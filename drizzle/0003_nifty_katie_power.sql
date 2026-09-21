@@ -1,0 +1,1 @@
+ALTER TABLE `notes` ADD `blocks` text DEFAULT '' NOT NULL;
