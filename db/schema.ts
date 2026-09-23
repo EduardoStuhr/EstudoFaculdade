@@ -13,6 +13,8 @@ export const users = sqliteTable(
     name: text("name").notNull(),
     email: text("email").notNull(),
     passwordHash: text("password_hash").notNull(),
+    emailVerifiedAt: text("email_verified_at"),
+    sessionVersion: integer("session_version").notNull().default(0),
     createdAt: text("created_at").notNull(),
   },
   (table) => [uniqueIndex("users_email_unique").on(table.email)],
@@ -109,3 +111,23 @@ export const exams = sqliteTable(
   },
   (table) => [index("idx_exams_user_date").on(table.userId, table.date)],
 );
+
+export const authTokens = sqliteTable("auth_tokens", {
+  tokenHash: text("token_hash").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  purpose: text("purpose", { enum: ["verify", "reset"] }).notNull(),
+  sessionVersion: integer("session_version").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+}, (table) => [index("idx_auth_tokens_expiry").on(table.expiresAt)]);
+
+export const authSessions = sqliteTable("auth_sessions", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  expiresAt: integer("expires_at").notNull(),
+}, (table) => [index("idx_auth_sessions_expiry").on(table.expiresAt)]);
+
+export const authRateLimits = sqliteTable("auth_rate_limits", {
+  key: text("key").primaryKey(),
+  attempts: integer("attempts").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+}, (table) => [index("idx_auth_rate_limits_expiry").on(table.expiresAt)]);

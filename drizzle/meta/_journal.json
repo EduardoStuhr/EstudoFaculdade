@@ -29,6 +29,20 @@
       "when": 1789651566496,
       "tag": "0003_nifty_katie_power",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1790164800004,
+      "tag": "0004_local_accounts_and_note_blocks",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1790164800005,
+      "tag": "0005_email_authentication",
+      "breakpoints": true
     }
   ]
 }

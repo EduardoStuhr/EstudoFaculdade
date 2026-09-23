@@ -1,10 +1,11 @@
-import { clearSessionCookie } from "@/lib/auth";
+import { clearSessionCookie, revokeSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   if (request.headers.get("origin") !== new URL(request.url).origin)
     return Response.json({ error: "Origem inválida." }, { status: 403 });
+  await revokeSession(request);
   return Response.json(
     { ok: true },
     {
