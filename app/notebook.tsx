@@ -1,78 +1,2042 @@
-'use client';
-import {useEffect,useRef,useState} from 'react';
-import {BookOpen,Plus,FileText,CalendarDays,Clock,Paperclip,Highlighter,Bold,ArrowLeft,ArrowUpRight,ArrowUp,ArrowDown,Trash2,Pencil,LockKeyhole,Check,Save,Download,NotebookPen,Library,Cloud,Loader2,ChevronRight} from 'lucide-react';
-import {Sidebar,SidebarProvider,SidebarContent,SidebarHeader,SidebarFooter,SidebarMenu,SidebarMenuItem,SidebarMenuButton,SidebarTrigger,useSidebar} from '@/components/ui/sidebar';
-import {Dialog,DialogContent,DialogTitle,DialogDescription} from '@/components/ui/dialog';
-import {AlertDialog,AlertDialogContent,AlertDialogTitle,AlertDialogDescription,AlertDialogCancel,AlertDialogAction,AlertDialogFooter} from '@/components/ui/alert-dialog';
-import {Empty,EmptyHeader,EmptyTitle,EmptyDescription} from '@/components/ui/empty';
-import {Skeleton} from '@/components/ui/skeleton';
-import {RadioGroup,RadioGroupItem} from '@/components/ui/radio-group';
-import {Toaster,toast} from 'sonner';
-type Subject={id:string;name:string;color:string};type BlockType='concept'|'example'|'warning'|'formula'|'definition'|'attention'|'comparison'|'section';type StudyBlock={id:string;type:BlockType;title:string;content:string};type Note={id:string;subject:string;title:string;body:string;summary:string;blocks:string;updated:string};type Attachment={id:string;note:string;name:string;size:number};type Exam={id:string;owner?:string;subject:string;title:string;date:string;time:string;content:string};type Data={subjects:Subject[];notes:Note[];files:Attachment[];exams:Exam[]};
-const colors=['#315be8','#9252d1','#087f75','#dc7040','#ca4672','#536476'];
-async function api(body?:any){const r=await fetch('/api/notebook',body?{method:'POST',headers:body instanceof FormData?undefined:{'Content-Type':'application/json'},body:body instanceof FormData?body:JSON.stringify(body)}:undefined);const data:any=await r.json();if(!r.ok)throw new Error(data.error||'Não foi possível concluir.');return data;}
-const date=(s:string)=>new Date(s).toLocaleDateString('pt-BR',{day:'2-digit',month:'short'});
-function cleanPastedText(value:string){return value.replace(/\r\n/g,'\n').replace(/\[cite:\s*[^\]]+\]/gi,'').replace(/^\s*#{1,6}\s*/gm,'').replace(/^\s*[-*_]{3,}\s*$/gm,'').replace(/\*\*([^*]+)\*\*/g,'$1').replace(/__([^_]+)__/g,'$1').replace(/`([^`]+)`/g,'$1').replace(/\\([.!?])/g,'$1').replace(/^\s*[-*+]\s+/gm,'• ').replace(/\n{3,}/g,'\n\n').trim();}
-function inlineParts(line:string){return line.replace(/\[cite:\s*[^\]]+\]/gi,'').split(/(==.*?==|\*\*.*?\*\*|`.*?`|\*[^*]+\*)/g).filter(Boolean);}
-function renderInline(line:string,key:string){return <span key={key}>{inlineParts(line).map((part,i)=>part.startsWith('==')&&part.endsWith('==')?<mark key={i}>{part.slice(2,-2)}</mark>:part.startsWith('**')&&part.endsWith('**')?<strong key={i}>{part.slice(2,-2)}</strong>:part.startsWith('`')&&part.endsWith('`')?<code key={i}>{part.slice(1,-1)}</code>:part.startsWith('*')&&part.endsWith('*')?<em key={i}>{part.slice(1,-1)}</em>:<span key={i}>{part.replace(/\*\*|==/g,'')}</span>)}</span>;}
-function escapeHtml(value:string){return value.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-function sanitizeRichHtml(value:string){return value.replace(/<span[^>]*background-color[^>]*>([\s\S]*?)<\/span>/gi,'<mark>$1</mark>').replace(/<\/?span[^>]*>/gi,'').replace(/<(?!\/?(?:strong|b|em|i|mark|code|br|p|ul|ol|li)\b)[^>]*>/gi,'').replace(/<(strong|b|em|i|mark|code|br|p|ul|ol|li)(?:\s[^>]*)?>/gi,'<$1>');}
-function editorHtml(value:string){return /<(?:strong|b|em|i|mark|code|br|p|ul|ol|li)\b/i.test(value)?sanitizeRichHtml(value):escapeHtml(value).replace(/\n/g,'<br>');}
-function richTextOnly(value:string){return value.replace(/<br\s*\/?>(\n)?/gi,'\n').replace(/<\/p>/gi,'\n').replace(/<[^>]+>/g,'').replace(/&nbsp;/g,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');}
-function renderRichBlock(text:string,key:string){return /<(?:strong|b|em|i|mark|code|br|p|ul|ol|li)\b/i.test(text)?<div key={key} className="rich-content" dangerouslySetInnerHTML={{__html:sanitizeRichHtml(text)}}/>:renderBlock(text,key);}
-function renderBlock(text:string,key:string){const lines=text.split('\n').filter(line=>line.trim());const table=lines.length>=2&&/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[1]);if(table){const rows=[lines[0],...lines.slice(2)].map(line=>line.split('|').map(cell=>cell.trim()).filter(Boolean));return <table className="study-table"><thead><tr>{rows[0].map((cell,i)=><th key={i}>{renderInline(cell,`${key}-h${i}`)}</th>)}</tr></thead><tbody>{rows.slice(1).map((row,i)=><tr key={i}>{row.map((cell,j)=><td key={j}>{renderInline(cell,`${key}-${i}-${j}`)}</td>)}</tr>)}</tbody></table>};const match=text.match(/^\s*(Conceito|Exemplo(?: prático)?|Erro comum|Fórmula(?:\/Sintaxe)?|Atenção|Definição)\s*:\s*([\s\S]*)$/i);if(match){const labels:{[k:string]:[string,string]}={conceito:['◈','concept'],exemplo:['↗','example'],'exemplo prático':['↗','example'],'erro comum':['!','warning'],'fórmula':['ƒx','formula'],'fórmula/sintaxe':['ƒx','formula'],atenção:['!','warning'],definição:['i','definition']};const [icon,kind]=labels[match[1].toLowerCase()]||['i','definition'];return <section className={`study-callout ${kind}`} key={key}><div className="callout-label"><span>{icon}</span>{match[1]}</div><div>{match[2].split('\n').map((line,j)=><span key={j}>{renderInline(line,`${key}-${j}`)}{j<match[2].split('\n').length-1&&<br/>}</span>)}</div></section>};return <p key={key}>{lines.map((line,j)=><span key={j}>{renderInline(line,`${key}-${j}`)}{j<lines.length-1&&<br/>}</span>)}</p>}
-const blockTypes:{value:BlockType;label:string}[]=[{value:'concept',label:'Conceito'},{value:'example',label:'Exemplo prático'},{value:'warning',label:'Erro comum'},{value:'formula',label:'Fórmula / Sintaxe'},{value:'definition',label:'Definição'},{value:'attention',label:'Atenção'},{value:'comparison',label:'Comparação / Tabela'},{value:'section',label:'Tópico geral'}];
-const blockMeta:Record<BlockType,[string,string]>={concept:['CONCEITO','concept'],example:['EXEMPLO PRÁTICO','example'],warning:['ERRO COMUM','warning'],formula:['FÓRMULA / SINTAXE','formula'],definition:['DEFINIÇÃO','definition'],attention:['ATENÇÃO','attention'],comparison:['COMPARAÇÃO','comparison'],section:['TÓPICO','section']};
-const legacyType=(label:string):BlockType=>label.toLowerCase().startsWith('conceito')?'concept':label.toLowerCase().startsWith('exemplo')?'example':label.toLowerCase().startsWith('erro')?'warning':label.toLowerCase().startsWith('fórmula')?'formula':label.toLowerCase().startsWith('definição')?'definition':label.toLowerCase().startsWith('atenção')?'attention':'section';
-function legacyBlocks(body:string):StudyBlock[]{return body.split(/\n\s*\n/).map(x=>x.trim()).filter(Boolean).map((raw,i)=>{const match=raw.match(/^\s*(Conceito|Exemplo(?: prático)?|Erro comum|Fórmula(?:\/Sintaxe)?|Atenção|Definição)\s*:\s*([\s\S]*)$/i);const text=(match?match[2]:raw).trim();const lines=text.split('\n').map(x=>x.trim()).filter(Boolean);const table=/^\s*\|/.test(raw)&&lines.length>=2;const convert=(value:string)=>value.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>').replace(/==(.+?)==/g,'<mark>$1</mark>');return {id:`legacy-${i}`,type:table?'comparison':match?legacyType(match[1]):'section',title:table?'Tabela comparativa':(lines[0]||`Tópico ${i+1}`).replace(/\*\*|==/g,''),content:table?convert(raw):convert(lines.slice(1).join('\n'))};});}
-function noteBlocks(note:Note):StudyBlock[]{if(note.blocks){try{const parsed=JSON.parse(note.blocks);if(Array.isArray(parsed))return parsed.filter(x=>x&&typeof x.title==='string'&&typeof x.content==='string'&&blockTypes.some(t=>t.value===x.type)).map((x,i)=>({...x,id:typeof x.id==='string'?x.id:`saved-${i}`}));}catch{}}return legacyBlocks(note.body);}
-function blocksToBody(blocks:StudyBlock[]){return blocks.filter(b=>b.title.trim()||richTextOnly(b.content).trim()).map(b=>`${blockTypes.find(t=>t.value===b.type)?.label||'Tópico'}: ${b.title.trim()}${richTextOnly(b.content).trim()?`\n${richTextOnly(b.content).trim()}`:''}`).join('\n\n');}
-function studySections(note:Note){return noteBlocks(note).map((block,i)=>{const meta=blockMeta[block.type]||blockMeta.section;return {key:block.id||`study-${i}`,label:meta[0],kind:meta[1],title:block.title||`Tópico ${i+1}`,detail:block.content};});}
-function renderStudySection(section:{key:string;label:string;kind:string;title:string;detail:string}){return <details className={`study-accordion ${section.kind}`} key={section.key}><summary><span className="accordion-label">{section.label}</span><span className="accordion-title">{section.title}</span><ChevronRight size={17} className="accordion-chevron"/></summary>{section.detail&&<div className="accordion-content">{renderRichBlock(section.detail,`${section.key}-content`)}</div>}</details>;}
-function derivedSummary(note:Note){if(note.summary?.trim())return note.summary.split('\n').map(x=>x.replace(/^\s*(?:[-•*]|\d+[.)])\s*/,'').trim()).filter(Boolean).slice(0,5);const titles=noteBlocks(note).map(block=>block.title.trim()).filter(Boolean).slice(0,5);if(titles.length)return titles;const candidates=note.body.replace(/\[cite:[^\]]+\]/gi,'').split(/\n+|(?<=[.!?])\s+/).map(x=>x.trim()).filter(x=>x.length>35&&!/^Conceito:|^Exemplo|^Erro|^Fórmula/i.test(x));return candidates.slice(0,4);}
+"use client";
+import { useEffect, useRef, useState } from "react";
+import {
+  BookOpen,
+  Plus,
+  FileText,
+  CalendarDays,
+  Clock,
+  Paperclip,
+  Highlighter,
+  Bold,
+  ArrowLeft,
+  ArrowUpRight,
+  ArrowUp,
+  ArrowDown,
+  Trash2,
+  Pencil,
+  LockKeyhole,
+  Check,
+  Save,
+  Download,
+  NotebookPen,
+  Library,
+  Cloud,
+  Loader2,
+  ChevronRight,
+} from "lucide-react";
+import {
+  Sidebar,
+  SidebarProvider,
+  SidebarContent,
+  SidebarHeader,
+  SidebarFooter,
+  SidebarMenu,
+  SidebarMenuItem,
+  SidebarMenuButton,
+  SidebarTrigger,
+  useSidebar,
+} from "@/components/ui/sidebar";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogCancel,
+  AlertDialogAction,
+  AlertDialogFooter,
+} from "@/components/ui/alert-dialog";
+import {
+  Empty,
+  EmptyHeader,
+  EmptyTitle,
+  EmptyDescription,
+} from "@/components/ui/empty";
+import { Skeleton } from "@/components/ui/skeleton";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Toaster, toast } from "sonner";
+import { EditorContent, useEditor } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import {
+  Table,
+  TableRow,
+  TableCell,
+  TableHeader,
+} from "@tiptap/extension-table";
+import Highlight from "@tiptap/extension-highlight";
+import DOMPurify from "dompurify";
+type Subject = { id: string; name: string; color: string };
+type BlockType =
+  | "concept"
+  | "example"
+  | "warning"
+  | "formula"
+  | "definition"
+  | "attention"
+  | "comparison"
+  | "section";
+type StudyBlock = {
+  id: string;
+  type: BlockType;
+  title: string;
+  content: string;
+};
+type Note = {
+  id: string;
+  subject: string;
+  title: string;
+  body: string;
+  summary: string;
+  blocks: string;
+  updated: string;
+};
+type Attachment = { id: string; note: string; name: string; size: number };
+type Exam = {
+  id: string;
+  owner?: string;
+  subject: string;
+  title: string;
+  date: string;
+  time: string;
+  content: string;
+};
+type Data = {
+  subjects: Subject[];
+  notes: Note[];
+  files: Attachment[];
+  exams: Exam[];
+};
+const colors = [
+  "#315be8",
+  "#9252d1",
+  "#087f75",
+  "#dc7040",
+  "#ca4672",
+  "#536476",
+];
+const emptyDoc = { type: "doc", content: [{ type: "paragraph" }] };
+function documentFrom(value: string) {
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed?.type === "doc") return parsed;
+  } catch {}
+  return {
+    type: "doc",
+    content: value
+      ? [
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: richTextOnly(value) }],
+          },
+        ]
+      : [{ type: "paragraph" }],
+  };
+}
+const editorExtensions = [
+  StarterKit,
+  Highlight.configure({ multicolor: false }),
+  Table.configure({ resizable: false }),
+  TableRow,
+  TableHeader,
+  TableCell,
+];
+function BlockEditor({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  const editor = useEditor({
+    extensions: editorExtensions,
+    content: documentFrom(value),
+    editable: !disabled,
+    immediatelyRender: false,
+    onUpdate: ({ editor }) => onChange(JSON.stringify(editor.getJSON())),
+    editorProps: {
+      transformPastedHTML: (html) =>
+        DOMPurify.sanitize(html, {
+          ALLOWED_TAGS: [
+            "p",
+            "br",
+            "strong",
+            "b",
+            "em",
+            "i",
+            "mark",
+            "code",
+            "ul",
+            "ol",
+            "li",
+            "table",
+            "thead",
+            "tbody",
+            "tr",
+            "th",
+            "td",
+          ],
+          ALLOWED_ATTR: ["colspan", "rowspan"],
+        }),
+    },
+  });
+  useEffect(() => {
+    editor?.setEditable(!disabled);
+  }, [editor, disabled]);
+  useEffect(() => {
+    const next = JSON.stringify(documentFrom(value));
+    if (editor && JSON.stringify(editor.getJSON()) !== next)
+      editor.commands.setContent(JSON.parse(next), { emitUpdate: false });
+  }, [editor, value]);
+  return (
+    <>
+      <div className="rich-toolbar">
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => editor?.chain().focus().toggleBold().run()}
+          disabled={disabled}
+        >
+          <Bold size={15} />
+          Negrito
+        </button>
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => editor?.chain().focus().toggleHighlight().run()}
+          disabled={disabled}
+        >
+          <Highlighter size={15} />
+          Marcar
+        </button>
+      </div>
+      <EditorContent
+        editor={editor}
+        className="block-content-editor"
+        aria-label="Conteúdo do tópico"
+      />
+    </>
+  );
+}
+function BlockViewer({ value }: { value: string }) {
+  const editor = useEditor({
+    extensions: editorExtensions,
+    content: documentFrom(value),
+    editable: false,
+    immediatelyRender: false,
+  });
+  return <EditorContent editor={editor} className="rich-content" />;
+}
+function AuthGate() {
+  const [ready, setReady] = useState(false),
+    [user, setUser] = useState<{ name: string } | null>(null);
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then(async (r) =>
+        r.ok
+          ? setUser(((await r.json()) as { user: { name: string } }).user)
+          : setUser(null),
+      )
+      .catch(() => setUser(null))
+      .finally(() => setReady(true));
+  }, []);
+  if (!ready)
+    return (
+      <div className="main-content">
+        <div className="loading">
+          <Skeleton className="h-12 w-64" />
+        </div>
+      </div>
+    );
+  return user ? (
+    <SidebarProvider>
+      <Workspace />
+    </SidebarProvider>
+  ) : (
+    <Login onAuthenticated={() => setUser({ name: "" })} />
+  );
+}
+function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
+  const [register, setRegister] = useState(false),
+    [name, setName] = useState(""),
+    [email, setEmail] = useState(""),
+    [password, setPassword] = useState(""),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const r = await fetch(
+        register ? "/api/auth/register" : "/api/auth/login",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            register ? { name, email, password } : { email, password },
+          ),
+        },
+      );
+      const data = (await r.json()) as { error?: string };
+      if (!r.ok) throw new Error(data.error);
+      onAuthenticated();
+    } catch (err: any) {
+      setError(err.message || "Não foi possível continuar.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <main className="workspace">
+      <div className="main-content">
+        <article className="paper subject-dialog">
+          <p className="eyebrow">CADERNO DIGITAL</p>
+          <h1>
+            {register ? "Crie sua conta" : "Entre no seu caderno"}
+            <span className="heading-dot">.</span>
+          </h1>
+          <p className="subtitle">
+            Suas matérias e anotações ficam separadas e protegidas.
+          </p>
+          {error && <p className="error-box">{error}</p>}
+          <form onSubmit={submit}>
+            {register && (
+              <>
+                <label>Seu nome</label>
+                <input
+                  required
+                  maxLength={100}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </>
+            )}
+            <label>E-mail</label>
+            <input
+              required
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+            <label>Senha</label>
+            <input
+              required
+              minLength={register ? 12 : undefined}
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            <button className="btn primary w-full" disabled={busy}>
+              {busy ? "Aguarde…" : register ? "Criar conta" : "Entrar"}
+            </button>
+          </form>
+          <button
+            className="text-button"
+            type="button"
+            onClick={() => {
+              setRegister(!register);
+              setError("");
+            }}
+          >
+            {register ? "Já tenho uma conta" : "Quero criar uma conta"}
+          </button>
+        </article>
+      </div>
+    </main>
+  );
+}
+async function api(body?: any) {
+  const r = await fetch(
+    "/api/notebook",
+    body
+      ? {
+          method: "POST",
+          headers:
+            body instanceof FormData
+              ? undefined
+              : { "Content-Type": "application/json" },
+          body: body instanceof FormData ? body : JSON.stringify(body),
+        }
+      : undefined,
+  );
+  const data: any = await r.json();
+  if (!r.ok) throw new Error(data.error || "Não foi possível concluir.");
+  return data;
+}
+const date = (s: string) =>
+  new Date(s).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
+function cleanPastedText(value: string) {
+  return value
+    .replace(/\r\n/g, "\n")
+    .replace(/\[cite:\s*[^\]]+\]/gi, "")
+    .replace(/^\s*#{1,6}\s*/gm, "")
+    .replace(/^\s*[-*_]{3,}\s*$/gm, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\\([.!?])/g, "$1")
+    .replace(/^\s*[-*+]\s+/gm, "• ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+function inlineParts(line: string) {
+  return line
+    .replace(/\[cite:\s*[^\]]+\]/gi, "")
+    .split(/(==.*?==|\*\*.*?\*\*|`.*?`|\*[^*]+\*)/g)
+    .filter(Boolean);
+}
+function renderInline(line: string, key: string) {
+  return (
+    <span key={key}>
+      {inlineParts(line).map((part, i) =>
+        part.startsWith("==") && part.endsWith("==") ? (
+          <mark key={i}>{part.slice(2, -2)}</mark>
+        ) : part.startsWith("**") && part.endsWith("**") ? (
+          <strong key={i}>{part.slice(2, -2)}</strong>
+        ) : part.startsWith("`") && part.endsWith("`") ? (
+          <code key={i}>{part.slice(1, -1)}</code>
+        ) : part.startsWith("*") && part.endsWith("*") ? (
+          <em key={i}>{part.slice(1, -1)}</em>
+        ) : (
+          <span key={i}>{part.replace(/\*\*|==/g, "")}</span>
+        ),
+      )}
+    </span>
+  );
+}
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+function sanitizeRichHtml(value: string) {
+  return value
+    .replace(
+      /<span[^>]*background-color[^>]*>([\s\S]*?)<\/span>/gi,
+      "<mark>$1</mark>",
+    )
+    .replace(/<\/?span[^>]*>/gi, "")
+    .replace(/<(?!\/?(?:strong|b|em|i|mark|code|br|p|ul|ol|li)\b)[^>]*>/gi, "")
+    .replace(/<(strong|b|em|i|mark|code|br|p|ul|ol|li)(?:\s[^>]*)?>/gi, "<$1>");
+}
+function editorHtml(value: string) {
+  return /<(?:strong|b|em|i|mark|code|br|p|ul|ol|li)\b/i.test(value)
+    ? sanitizeRichHtml(value)
+    : escapeHtml(value).replace(/\n/g, "<br>");
+}
+function richTextOnly(value: string) {
+  try {
+    const document = JSON.parse(value);
+    if (document?.type === "doc") {
+      const collect = (node: {
+        type?: string;
+        text?: string;
+        content?: unknown[];
+      }): string =>
+        node.type === "text"
+          ? node.text || ""
+          : (node.content || [])
+              .map((child) =>
+                collect(
+                  child as {
+                    type?: string;
+                    text?: string;
+                    content?: unknown[];
+                  },
+                ),
+              )
+              .join(node.type === "hardBreak" ? "\n" : "") +
+            (["paragraph", "listItem", "tableRow", "heading"].includes(
+              node.type || "",
+            )
+              ? "\n"
+              : "");
+      return collect(document).trim();
+    }
+  } catch {}
+  return value
+    .replace(/<br\s*\/?>(\n)?/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+function renderRichBlock(text: string, key: string) {
+  return /<(?:strong|b|em|i|mark|code|br|p|ul|ol|li)\b/i.test(text) ? (
+    <div
+      key={key}
+      className="rich-content"
+      dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(text) }}
+    />
+  ) : (
+    renderBlock(text, key)
+  );
+}
+function renderBlock(text: string, key: string) {
+  const lines = text.split("\n").filter((line) => line.trim());
+  const table =
+    lines.length >= 2 &&
+    /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[1]);
+  if (table) {
+    const rows = [lines[0], ...lines.slice(2)].map((line) =>
+      line
+        .split("|")
+        .map((cell) => cell.trim())
+        .filter(Boolean),
+    );
+    return (
+      <table className="study-table">
+        <thead>
+          <tr>
+            {rows[0].map((cell, i) => (
+              <th key={i}>{renderInline(cell, `${key}-h${i}`)}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.slice(1).map((row, i) => (
+            <tr key={i}>
+              {row.map((cell, j) => (
+                <td key={j}>{renderInline(cell, `${key}-${i}-${j}`)}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  }
+  const match = text.match(
+    /^\s*(Conceito|Exemplo(?: prático)?|Erro comum|Fórmula(?:\/Sintaxe)?|Atenção|Definição)\s*:\s*([\s\S]*)$/i,
+  );
+  if (match) {
+    const labels: { [k: string]: [string, string] } = {
+      conceito: ["◈", "concept"],
+      exemplo: ["↗", "example"],
+      "exemplo prático": ["↗", "example"],
+      "erro comum": ["!", "warning"],
+      fórmula: ["ƒx", "formula"],
+      "fórmula/sintaxe": ["ƒx", "formula"],
+      atenção: ["!", "warning"],
+      definição: ["i", "definition"],
+    };
+    const [icon, kind] = labels[match[1].toLowerCase()] || ["i", "definition"];
+    return (
+      <section className={`study-callout ${kind}`} key={key}>
+        <div className="callout-label">
+          <span>{icon}</span>
+          {match[1]}
+        </div>
+        <div>
+          {match[2].split("\n").map((line, j) => (
+            <span key={j}>
+              {renderInline(line, `${key}-${j}`)}
+              {j < match[2].split("\n").length - 1 && <br />}
+            </span>
+          ))}
+        </div>
+      </section>
+    );
+  }
+  return (
+    <p key={key}>
+      {lines.map((line, j) => (
+        <span key={j}>
+          {renderInline(line, `${key}-${j}`)}
+          {j < lines.length - 1 && <br />}
+        </span>
+      ))}
+    </p>
+  );
+}
+const blockTypes: { value: BlockType; label: string }[] = [
+  { value: "concept", label: "Conceito" },
+  { value: "example", label: "Exemplo prático" },
+  { value: "warning", label: "Erro comum" },
+  { value: "formula", label: "Fórmula / Sintaxe" },
+  { value: "definition", label: "Definição" },
+  { value: "attention", label: "Atenção" },
+  { value: "comparison", label: "Comparação / Tabela" },
+  { value: "section", label: "Tópico geral" },
+];
+const blockMeta: Record<BlockType, [string, string]> = {
+  concept: ["CONCEITO", "concept"],
+  example: ["EXEMPLO PRÁTICO", "example"],
+  warning: ["ERRO COMUM", "warning"],
+  formula: ["FÓRMULA / SINTAXE", "formula"],
+  definition: ["DEFINIÇÃO", "definition"],
+  attention: ["ATENÇÃO", "attention"],
+  comparison: ["COMPARAÇÃO", "comparison"],
+  section: ["TÓPICO", "section"],
+};
+const legacyType = (label: string): BlockType =>
+  label.toLowerCase().startsWith("conceito")
+    ? "concept"
+    : label.toLowerCase().startsWith("exemplo")
+      ? "example"
+      : label.toLowerCase().startsWith("erro")
+        ? "warning"
+        : label.toLowerCase().startsWith("fórmula")
+          ? "formula"
+          : label.toLowerCase().startsWith("definição")
+            ? "definition"
+            : label.toLowerCase().startsWith("atenção")
+              ? "attention"
+              : "section";
+function legacyBlocks(body: string): StudyBlock[] {
+  return body
+    .split(/\n\s*\n/)
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .map((raw, i) => {
+      const match = raw.match(
+        /^\s*(Conceito|Exemplo(?: prático)?|Erro comum|Fórmula(?:\/Sintaxe)?|Atenção|Definição)\s*:\s*([\s\S]*)$/i,
+      );
+      const text = (match ? match[2] : raw).trim();
+      const lines = text
+        .split("\n")
+        .map((x) => x.trim())
+        .filter(Boolean);
+      const table = /^\s*\|/.test(raw) && lines.length >= 2;
+      const convert = (value: string) =>
+        value
+          .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+          .replace(/==(.+?)==/g, "<mark>$1</mark>");
+      return {
+        id: `legacy-${i}`,
+        type: table ? "comparison" : match ? legacyType(match[1]) : "section",
+        title: table
+          ? "Tabela comparativa"
+          : (lines[0] || `Tópico ${i + 1}`).replace(/\*\*|==/g, ""),
+        content: table ? convert(raw) : convert(lines.slice(1).join("\n")),
+      };
+    });
+}
+function noteBlocks(note: Note): StudyBlock[] {
+  if (note.blocks) {
+    try {
+      const parsed = JSON.parse(note.blocks);
+      if (Array.isArray(parsed))
+        return parsed
+          .filter(
+            (x) =>
+              x &&
+              typeof x.title === "string" &&
+              typeof x.content === "string" &&
+              blockTypes.some((t) => t.value === x.type),
+          )
+          .map((x, i) => ({
+            ...x,
+            id: typeof x.id === "string" ? x.id : `saved-${i}`,
+          }));
+    } catch {}
+  }
+  return legacyBlocks(note.body);
+}
+function blocksToBody(blocks: StudyBlock[]) {
+  return blocks
+    .filter((b) => b.title.trim() || richTextOnly(b.content).trim())
+    .map(
+      (b) =>
+        `${blockTypes.find((t) => t.value === b.type)?.label || "Tópico"}: ${b.title.trim()}${richTextOnly(b.content).trim() ? `\n${richTextOnly(b.content).trim()}` : ""}`,
+    )
+    .join("\n\n");
+}
+function studySections(note: Note) {
+  return noteBlocks(note).map((block, i) => {
+    const meta = blockMeta[block.type] || blockMeta.section;
+    return {
+      key: block.id || `study-${i}`,
+      label: meta[0],
+      kind: meta[1],
+      title: block.title || `Tópico ${i + 1}`,
+      detail: block.content,
+    };
+  });
+}
+function renderStudySection(section: {
+  key: string;
+  label: string;
+  kind: string;
+  title: string;
+  detail: string;
+}) {
+  return (
+    <details className={`study-accordion ${section.kind}`} key={section.key}>
+      <summary>
+        <span className="accordion-label">{section.label}</span>
+        <span className="accordion-title">{section.title}</span>
+        <ChevronRight size={17} className="accordion-chevron" />
+      </summary>
+      {section.detail && (
+        <div className="accordion-content">
+          <BlockViewer value={section.detail} />
+        </div>
+      )}
+    </details>
+  );
+}
+function derivedSummary(note: Note) {
+  if (note.summary?.trim())
+    return note.summary
+      .split("\n")
+      .map((x) => x.replace(/^\s*(?:[-•*]|\d+[.)])\s*/, "").trim())
+      .filter(Boolean)
+      .slice(0, 5);
+  const titles = noteBlocks(note)
+    .map((block) => block.title.trim())
+    .filter(Boolean)
+    .slice(0, 5);
+  if (titles.length) return titles;
+  const candidates = note.body
+    .replace(/\[cite:[^\]]+\]/gi, "")
+    .split(/\n+|(?<=[.!?])\s+/)
+    .map((x) => x.trim())
+    .filter(
+      (x) => x.length > 35 && !/^Conceito:|^Exemplo|^Erro|^Fórmula/i.test(x),
+    );
+  return candidates.slice(0, 4);
+}
 
-
-export default function Notebook(){return <SidebarProvider><Workspace/><Toaster richColors position="bottom-right"/></SidebarProvider>;}
-function Workspace(){
- const [data,setData]=useState<Data>({subjects:[],notes:[],files:[],exams:[]}),[loading,setLoading]=useState(true),[error,setError]=useState(''),[view,setView]=useState<'home'|'exams'>('home'),[subjectId,setSubjectId]=useState<string|null>(null),[note,setNote]=useState<Note|null>(null),[dirty,setDirty]=useState(false),[busy,setBusy]=useState(false),[dialog,setDialog]=useState(false),[editSubject,setEditSubject]=useState<Subject|null>(null),[name,setName]=useState(''),[color,setColor]=useState(colors[0]),[remove,setRemove]=useState<{action:string;id:string;label:string}|null>(null),[editingContent,setEditingContent]=useState(false);
- const {setOpenMobile}=useSidebar();const uploadRef=useRef<HTMLInputElement>(null);const lock=useRef(false);const editorValues=useRef<Record<string,string>>({});
- const current=data.subjects.find(s=>s.id===subjectId);const [examDialog,setExamDialog]=useState(false),[editingExam,setEditingExam]=useState<Exam|null>(null),[examTitle,setExamTitle]=useState(''),[examSubject,setExamSubject]=useState(''),[examDate,setExamDate]=useState(''),[examTime,setExamTime]=useState(''),[examContent,setExamContent]=useState('');const notes=data.notes.filter(n=>n.subject===subjectId);const attachments=data.files.filter(f=>f.note===note?.id);
- async function refresh(){const result=await api();setData(result);setError('');return result as Data;}
- useEffect(()=>{refresh().catch(e=>setError(e.message)).finally(()=>setLoading(false));},[]);
- useEffect(()=>{const fn=(e:BeforeUnloadEvent)=>{if(dirty){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',fn);return()=>window.removeEventListener('beforeunload',fn);},[dirty]);
- function currentBlocks(){if(!note)return [];return noteBlocks(note).map(block=>editorValues.current[block.id]!==undefined?{...block,content:editorValues.current[block.id]}:block);}
- async function save(){if(!note||!dirty)return true;const blocks=currentBlocks(),body=blocksToBody(blocks),payload={...note,body,blocks:JSON.stringify(blocks)};if(!note.title.trim()&&!body.trim()){setDirty(false);return true;}if(lock.current)return false;lock.current=true;setBusy(true);try{const r=await api({action:'note',...payload});const saved={...payload,id:r.id,updated:new Date().toISOString()};setNote(saved);editorValues.current={};setData(d=>({...d,notes:[saved,...d.notes.filter(n=>n.id!==r.id)]}));setDirty(false);setEditingContent(false);toast.success('Página salva');return true;}catch(e:any){toast.error(e.message);return false;}finally{lock.current=false;setBusy(false);}}
- async function go(s:string|null,n:Note|null=null){if(busy)return;if(!await save())return;editorValues.current={};setView('home');setSubjectId(s);setNote(n);setDirty(false);setEditingContent(!n?.body.trim());setOpenMobile(false);}
- async function newNote(s:string){if(busy)return;if(!await save())return;const first:StudyBlock={id:crypto.randomUUID(),type:'concept',title:'',content:''};editorValues.current={};setSubjectId(s);setNote({id:'',subject:s,title:'',body:'',summary:'',blocks:JSON.stringify([first]),updated:new Date().toISOString()});setDirty(true);setEditingContent(true);}
- function openSubject(s:Subject|null=null){setEditSubject(s);setName(s?.name||'');setColor(s?.color||colors[data.subjects.length%colors.length]);setDialog(true);}
- async function submitSubject(e:React.FormEvent){e.preventDefault();if(lock.current)return;lock.current=true;setBusy(true);try{const r=await api({action:'subject',id:editSubject?.id,name,color});await refresh();setDialog(false);if(!editSubject&&!note){setSubjectId(r.id);}toast.success(editSubject?'Matéria atualizada':'Matéria criada');}catch(e:any){toast.error(e.message);}finally{lock.current=false;setBusy(false);}}
- async function upload(files:FileList|null){if(!files?.length||!note)return;if(!await save())return;let nid=note.id;if(!nid){toast.info('A página foi salva. Selecione os arquivos novamente para anexar.');return;}setBusy(true);try{for(const f of Array.from(files)){if(f.size>20*1024*1024)throw new Error(`${f.name}: limite de 20 MB.`);const form=new FormData();form.set('file',f);form.set('note',nid);const saved=await api(form);setData(d=>({...d,files:[...d.files,saved]}));}toast.success('Arquivos anexados');}catch(e:any){toast.error(e.message);}finally{setBusy(false);if(uploadRef.current)uploadRef.current.value='';}}
- function setStudyBlocks(blocks:StudyBlock[]){if(!note)return;const merged=blocks.map(block=>editorValues.current[block.id]!==undefined?{...block,content:editorValues.current[block.id]}:block);setNote({...note,blocks:JSON.stringify(merged),body:blocksToBody(merged)});setDirty(true);}
- function updateBlock(id:string,patch:Partial<StudyBlock>){setStudyBlocks(currentBlocks().map(block=>block.id===id?{...block,...patch}:block));}
- function addBlock(type:BlockType='concept'){setStudyBlocks([...currentBlocks(),{id:crypto.randomUUID(),type,title:'',content:''}]);}
- function removeBlock(id:string){const next=currentBlocks().filter(block=>block.id!==id);delete editorValues.current[id];setStudyBlocks(next.length?next:[{id:crypto.randomUUID(),type:'concept',title:'',content:''}]);}
- function moveBlock(index:number,direction:-1|1){const blocks=[...currentBlocks()],next=index+direction;if(next<0||next>=blocks.length)return;[blocks[index],blocks[next]]=[blocks[next],blocks[index]];setStudyBlocks(blocks);}
- function formatBlock(id:string,command:'bold'|'hiliteColor'){const el=document.querySelector(`[data-block-editor="${id}"]`) as HTMLDivElement|null;if(!el)return;el.focus();document.execCommand(command,false,command==='hiliteColor'?'#fff0a8':undefined);editorValues.current[id]=el.innerHTML;setDirty(true);}
- function openExam(e:Exam|null=null){setEditingExam(e);setExamTitle(e?.title||'');setExamSubject(e?.subject||data.subjects[0]?.id||'');setExamDate(e?.date||'');setExamTime(e?.time||'09:00');setExamContent(e?.content||'');setExamDialog(true);}
- async function submitExam(ev:React.FormEvent){ev.preventDefault();if(lock.current)return;lock.current=true;setBusy(true);try{await api({action:'exam',id:editingExam?.id,title:examTitle,subject:examSubject,date:examDate,time:examTime,content:examContent});await refresh();setExamDialog(false);toast.success(editingExam?'Prova atualizada':'Prova registrada');}catch(e:any){toast.error(e.message);}finally{lock.current=false;setBusy(false);}}
- async function destroy(){if(!remove)return;setBusy(true);try{await api(remove);if(remove.action==='delete-note'){setNote(null);setDirty(false);}if(remove.action==='delete-subject'){setNote(null);setDirty(false);setSubjectId(null);}await refresh();setRemove(null);toast.success('Excluído');}catch(e:any){toast.error(e.message);}finally{setBusy(false);}}
- useEffect(()=>{const context=(document as any).modelContext;if(!context?.registerTool)return;const life=new AbortController();const schema={type:'object',properties:{},additionalProperties:false};Promise.all([context.registerTool({name:'list_study_notebook',description:'Lista as matérias e páginas salvas do caderno atual.',inputSchema:schema,annotations:{readOnlyHint:true,untrustedContentHint:true},execute:async()=>{const d=await refresh();return {subjects:d.subjects,notes:d.notes.map(n=>({id:n.id,subject:n.subject,title:n.title})),files:d.files};}},{signal:life.signal}),context.registerTool({name:'export_study_notebook',description:'Exporta o backup completo e privado do caderno atual, incluindo matérias, páginas, resumos, blocos, provas e metadados de arquivos.',inputSchema:schema,annotations:{readOnlyHint:true,untrustedContentHint:true},execute:async()=>await refresh()},{signal:life.signal})]).catch(()=>{});return()=>life.abort();},[]);
- return <>
- <Sidebar className="border-r border-[#e5e9f2]"><SidebarHeader className="px-6 pt-8 pb-9"><button className="brand" onClick={()=>go(null)}><span className="brand-icon"><NotebookPen size={23}/></span><span>Caderno<span className="brand-small">MEU ESPAÇO DE ESTUDOS</span></span></button></SidebarHeader><SidebarContent className="px-4"><SidebarMenu><SidebarMenuItem><SidebarMenuButton className="nav-item" isActive={!subjectId} onClick={()=>go(null)}><Library/><span>Minhas matérias</span><span className="count">{data.subjects.length}</span></SidebarMenuButton></SidebarMenuItem><SidebarMenuItem><SidebarMenuButton className="nav-item" isActive={view==='exams'} onClick={()=>{if(!busy){setView('exams');setSubjectId(null);setNote(null);setOpenMobile(false);}}}><CalendarDays/><span>Provas</span><span className="count">{data.exams.length}</span></SidebarMenuButton></SidebarMenuItem></SidebarMenu><div className="side-label">MATÉRIAS<button title="Nova matéria" onClick={()=>openSubject()} disabled={busy}><Plus size={17}/></button></div><SidebarMenu>{data.subjects.map(s=><SidebarMenuItem key={s.id}><SidebarMenuButton className="nav-item" isActive={subjectId===s.id} onClick={()=>go(s.id)}><BookOpen style={{color:s.color}}/><span>{s.name}</span></SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu>{!data.subjects.length&&!loading&&<p className="side-hint">Suas matérias aparecerão aqui.</p>}<button className="side-add" onClick={()=>openSubject()} disabled={busy}><Plus size={17}/>Adicionar matéria</button></SidebarContent><SidebarFooter className="p-5"><div className="private"><LockKeyhole size={16}/><div>Caderno privado<small>Seu espaço, suas anotações</small></div></div></SidebarFooter></Sidebar>
- <main className="workspace"><header className="topbar"><div className="breadcrumb"><SidebarTrigger/><button onClick={()=>go(null)}>Meu caderno</button>{current&&<><span>/</span><button onClick={()=>go(current.id)}>{current.name}</button></>}</div><span className="private-tag"><LockKeyhole size={14}/>Pessoal</span></header>
- <div className="main-content">
- {error?<div role="alert" className="error-box"><h2>Não foi possível abrir seu caderno</h2><p>{error}</p><button className="btn primary" onClick={()=>{setLoading(true);refresh().catch(e=>setError(e.message)).finally(()=>setLoading(false));}}>Tentar novamente</button></div>:loading?<div className="loading"><Skeleton className="h-12 w-64"/><Skeleton className="h-6 w-80"/><div className="cards">{[1,2,3].map(i=><Skeleton className="h-56" key={i}/>)}</div></div>:note?<>
- <div className="editor-top"><button className="text-button" disabled={busy} onClick={()=>go(subjectId)}><ArrowLeft size={17}/>Voltar às páginas</button><div className="row"><span className="save-status" aria-live="polite">{busy?<><Loader2 size={14} className="spin"/>Salvando…</>:dirty?'Alterações não salvas':<><Check size={14}/>Salvo online</>}</span><button className="btn primary" disabled={busy||!dirty} onClick={save}><Save size={16}/>Salvar</button>{note.id&&<button className="icon-button danger" title="Excluir página" disabled={busy} onClick={()=>setRemove({action:'delete-note',id:note.id,label:'Excluir esta página e todos os seus anexos?'})}><Trash2 size={18}/></button>}</div></div>
- <article className="paper"><div className="page-label"><BookOpen size={15} style={{color:current?.color}}/>{current?.name}<span>PÁGINA DE ESTUDOS</span></div><div className="content-mode-bar">{editingContent?<span>Crie um cartão para cada tópico da aula</span>:<button type="button" className="btn edit-content-button" onClick={()=>setEditingContent(true)}><Pencil size={16}/>Editar página</button>}</div>{editingContent?<input aria-label="Título da página" placeholder="Título da sua página" className="title-input" maxLength={200} value={note.title} disabled={busy} onChange={e=>{setNote({...note,title:e.target.value});setDirty(true);}}/>:<h1 className="reading-title">{note.title||'Página sem título'}</h1>}<div className="quick-summary">{editingContent?<><div className="summary-heading"><span>RESUMO RÁPIDO</span><small>Opcional: escreva de 3 a 5 pontos. Se deixar vazio, usaremos os títulos dos cartões.</small></div><textarea aria-label="Resumo rápido" className="summary-input" maxLength={12000} placeholder="• Conceito principal\n• Exemplo importante\n• Ponto que costuma cair na prova" value={note.summary||''} onChange={e=>{setNote({...note,summary:e.target.value});setDirty(true);}} disabled={busy}/></>:<><div className="summary-heading"><span>RESUMO RÁPIDO</span><small>Revisão em menos de um minuto</small></div><ul>{derivedSummary(note).map((item,i)=><li key={i}>{item}</li>)}</ul></>}</div><div className="writing-info"><Pencil size={14}/>{editingContent?'Blocos da página':'Anotações'}<span>{noteBlocks(note).length} {noteBlocks(note).length===1?'tópico':'tópicos'} · {note.body.trim()?note.body.trim().split(/\s+/).length:0} palavras</span></div>{editingContent?<div className="block-editor"><div className="block-editor-intro"><strong>Organize a aula por tópicos</strong><span>Escolha o tipo, dê um nome ao tópico e cole o conteúdo dentro do cartão.</span></div>{noteBlocks(note).map((block,index,all)=><section className={`edit-block-card ${block.type}`} key={block.id}><div className="edit-block-top"><label><span>Tipo do bloco</span><select value={block.type} onChange={e=>updateBlock(block.id,{type:e.target.value as BlockType})} disabled={busy}>{blockTypes.map(type=><option key={type.value} value={type.value}>{type.label}</option>)}</select></label><div className="block-order"><button type="button" title="Mover tópico para cima" disabled={busy||index===0} onClick={()=>moveBlock(index,-1)}><ArrowUp size={16}/></button><button type="button" title="Mover tópico para baixo" disabled={busy||index===all.length-1} onClick={()=>moveBlock(index,1)}><ArrowDown size={16}/></button><button type="button" className="danger" title="Excluir tópico" disabled={busy} onClick={()=>removeBlock(block.id)}><Trash2 size={16}/></button></div></div><label className="block-field"><span>Título do tópico</span><input value={block.title} maxLength={180} placeholder="Ex.: MVC — Model-View-Controller" onChange={e=>updateBlock(block.id,{title:e.target.value})} disabled={busy}/></label><div className="block-field"><span>Conteúdo</span><div className="rich-toolbar"><button type="button" onMouseDown={e=>e.preventDefault()} onClick={()=>formatBlock(block.id,'bold')} disabled={busy}><Bold size={15}/>Negrito</button><button type="button" onMouseDown={e=>e.preventDefault()} onClick={()=>formatBlock(block.id,'hiliteColor')} disabled={busy}><Highlighter size={15}/>Marcar</button></div><div data-block-editor={block.id} className="block-content-editor" contentEditable={!busy} suppressContentEditableWarning dangerouslySetInnerHTML={{__html:editorHtml(block.content)}} aria-label={`Conteúdo do tópico ${index+1}`} data-placeholder="Digite ou cole aqui a explicação, exemplo, fórmula ou observação…" onInput={e=>{editorValues.current[block.id]=e.currentTarget.innerHTML;setDirty(true);}} onPaste={e=>{e.preventDefault();document.execCommand('insertText',false,cleanPastedText(e.clipboardData.getData('text/plain')));editorValues.current[block.id]=e.currentTarget.innerHTML;setDirty(true);}}/></div></section>)}<button type="button" className="add-study-block" onClick={()=>addBlock()} disabled={busy}><Plus size={18}/>Adicionar novo tópico</button></div>:<div className="reading-area"><div className="topics-overview"><span>TÓPICOS DESTA PÁGINA</span><ol>{noteBlocks(note).filter(block=>block.title.trim()).map(block=><li key={block.id}>{block.title}</li>)}</ol></div><div className="reading-kicker"><span>CONTEÚDO DA PÁGINA</span><small>Abra cada bloco no seu ritmo</small></div><div className="study-sections">{studySections(note).map(renderStudySection)}</div><button type="button" className="btn edit-content-button" onClick={()=>setEditingContent(true)}><Pencil size={16}/>Editar página</button></div>}
- <section className="attachments"><div className="section-line"><h3><Paperclip size={17}/>Arquivos da página <span>{attachments.length}</span></h3><button className="text-button" disabled={busy||!note.id||dirty} onClick={()=>uploadRef.current?.click()}><Plus size={16}/>Anexar arquivo</button></div><input ref={uploadRef} type="file" multiple hidden onChange={e=>upload(e.target.files)}/>{attachments.length?<div className="file-list">{attachments.map(f=><div className="file-row" key={f.id}><FileText size={21}/><div><strong>{f.name}</strong><small>{f.size<1048576?Math.ceil(f.size/1024)+' KB':(f.size/1048576).toFixed(1)+' MB'}</small></div><a className="icon-button" href={'/api/notebook?file='+f.id} title={'Baixar '+f.name}><Download size={17}/></a><button className="icon-button danger" title={'Excluir '+f.name} disabled={busy} onClick={()=>setRemove({action:'delete-file',id:f.id,label:`Excluir o arquivo “${f.name}”?`})}><Trash2 size={16}/></button></div>)}</div>:<div className="upload-empty"><Paperclip size={24}/><p>{!note.id||dirty?'Salve a página para anexar seus materiais.':'Guarde aqui PDFs, imagens, documentos e outros materiais.'}</p><small>Até 20 MB por arquivo</small></div>}</section></article></>:view==='exams'?<div className="exams-view"><div className="page-heading"><div><p className="eyebrow">PLANEJAMENTO</p><h1>Minhas provas<span className="heading-dot">.</span></h1><p className="subtitle">Cadastre suas avaliações e acompanhe o que está chegando.</p></div><button className="btn primary" disabled={busy||!data.subjects.length} onClick={()=>openExam()}><Plus size={18}/>Nova prova</button></div><div className="summary-strip"><span><CalendarDays size={17}/><strong>{data.exams.length}</strong>provas cadastradas</span><span><Clock size={17}/><strong>{data.exams.filter(e=>e.date>=new Date().toISOString().slice(0,10)).length}</strong>próximas</span></div>{!data.subjects.length?<div className="error-box"><h2>Crie uma matéria primeiro</h2><p>As provas ficam vinculadas às matérias do seu caderno.</p></div>:data.exams.length?<div className="exam-list">{data.exams.map(e=>{const sub=data.subjects.find(x=>x.id===e.subject);return <div className="exam-row" key={e.id}><span className="exam-date"><strong>{new Date(e.date+'T12:00').toLocaleDateString('pt-BR',{day:'2-digit'})}</strong><small>{new Date(e.date+'T12:00').toLocaleDateString('pt-BR',{month:'short'}).replace('.','')}</small></span><div className="exam-info"><h3>{e.title}</h3><p><span style={{color:sub?.color}}>{sub?.name||'Matéria removida'}</span> · {e.time}</p>{e.content&&<small>{e.content}</small>}</div><button className="icon-button" title="Editar prova" onClick={()=>openExam(e)}><Pencil size={17}/></button><button className="icon-button danger" title="Excluir prova" onClick={()=>setRemove({action:'delete-exam',id:e.id,label:`Excluir a prova “${e.title}”?`})}><Trash2 size={16}/></button></div>})}</div>:<Empty className="empty-panel"><EmptyHeader><span className="empty-icon"><CalendarDays size={32}/></span><EmptyTitle>Nenhuma prova cadastrada</EmptyTitle><EmptyDescription>Adicione suas avaliações para lembrar das datas e do conteúdo.</EmptyDescription></EmptyHeader><button className="btn primary" onClick={()=>openExam()}><Plus size={17}/>Cadastrar primeira prova</button></Empty>}</div>:<>
- <div className="page-heading"><div><p className="eyebrow">SEU CADERNO DIGITAL</p><h1>{current?current.name:'Minhas matérias'}<span className="heading-dot">.</span></h1><p className="subtitle">{current?'Cada aula, uma nova página de conhecimento.':'Um lugar para tudo o que você está aprendendo.'}</p></div><div className="row">{current?<><button className="icon-button" title="Editar matéria" disabled={busy} onClick={()=>openSubject(current)}><Pencil size={18}/></button><button className="icon-button danger" title="Excluir matéria" disabled={busy} onClick={()=>setRemove({action:'delete-subject',id:current.id,label:'Excluir esta matéria, suas páginas e todos os anexos?'})}><Trash2 size={18}/></button><button className="btn primary" disabled={busy} onClick={()=>newNote(current.id)}><Plus size={18}/>Nova página</button></>:<button className="btn primary" disabled={busy} onClick={()=>openSubject()}><Plus size={18}/>Nova matéria</button>}</div></div>
- <div className="summary-strip"><span><BookOpen size={17}/><strong>{current?notes.length:data.subjects.length}</strong>{current?'páginas':'matérias'}</span><span><FileText size={17}/><strong>{current?notes.reduce((n,p)=>n+p.body.length,0).toLocaleString('pt-BR'):data.notes.length}</strong>{current?'caracteres anotados':'páginas escritas'}</span><span><Paperclip size={17}/><strong>{current?data.files.filter(f=>notes.some(n=>n.id===f.note)).length:data.files.length}</strong>arquivos</span></div>
- {current?<><div className="section-line section-title"><h2>Páginas desta matéria</h2><span>{notes.length} {notes.length===1?'página':'páginas'}</span></div>{notes.length?<div className="note-list">{notes.map(n=><button key={n.id} className="note-row" onClick={()=>go(current.id,n)}><span className="note-icon" style={{color:current.color}}><FileText size={24}/></span><div><h3>{n.title}</h3><p>{n.body.slice(0,110)||'Página sem texto'}</p></div><span className="note-date">{date(n.updated)}</span><ArrowUpRight size={18}/></button>)}</div>:<Empty className="empty-panel"><EmptyHeader><span className="empty-icon"><FileText size={32}/></span><EmptyTitle>Uma matéria, muitas descobertas</EmptyTitle><EmptyDescription>Crie sua primeira página para registrar o conteúdo da aula.</EmptyDescription></EmptyHeader><button className="btn primary" onClick={()=>newNote(current.id)}><Plus size={17}/>Criar primeira página</button></Empty>}</>:<><div className="section-line section-title"><h2>Suas matérias</h2><span>Organizadas do seu jeito</span></div><div className="cards">{data.subjects.map((s,i)=>{const ns=data.notes.filter(n=>n.subject===s.id);return <button className="subject-card" key={s.id} onClick={()=>go(s.id)} style={{'--subject-color':s.color} as React.CSSProperties}><div className="card-cover"><span className="cover-icon"><BookOpen size={29}/></span><span className="cover-number">{String(i+1).padStart(2,'0')}</span><div className="cover-name">{s.name}</div></div><div className="card-bottom"><span>{ns.length} {ns.length===1?'página':'páginas'}</span><ArrowUpRight size={18}/></div></button>})}<button className="new-card" onClick={()=>openSubject()}><span className="add-circle"><Plus size={24}/></span><strong>{data.subjects.length?'Nova matéria':'Sua primeira matéria'}</strong><p>{data.subjects.length?'Abra espaço para aprender mais':'Comece organizando o que você estuda'}</p></button></div>{!data.subjects.length&&<div className="getting-started"><span className="tiny-number">01</span><div><strong>Comece por uma matéria</strong><p>Depois, crie páginas para suas aulas e reúna textos e arquivos no mesmo lugar.</p></div><NotebookPen size={38}/></div>}</>}
- <footer className="page-footer"><Cloud size={15}/>Seu conhecimento, guardado online.</footer>
- </>}
- </div></main>
- <Dialog open={dialog} onOpenChange={v=>{if(!busy)setDialog(v);}}><DialogContent className="subject-dialog"><DialogTitle>{editSubject?'Editar matéria':'Uma nova matéria'}</DialogTitle><DialogDescription>Dê um nome e escolha a cor do seu caderno.</DialogDescription><form onSubmit={submitSubject}><label htmlFor="subject-name">Nome da matéria</label><input id="subject-name" autoFocus required maxLength={100} placeholder="Ex.: Fundamentos de Redes" value={name} onChange={e=>setName(e.target.value)} disabled={busy}/><label>Cor da capa</label><RadioGroup value={color} onValueChange={setColor} className="color-picker">{colors.map((c,i)=><label key={c} className="color-option" style={{background:c}}><RadioGroupItem value={c} aria-label={['Azul','Roxo','Verde','Laranja','Rosa','Cinza'][i]} className="sr-only"/>{color===c&&<Check size={21} color="white"/>}</label>)}</RadioGroup><button className="btn primary w-full" disabled={busy||!name.trim()}>{busy?'Salvando…':editSubject?'Salvar matéria':'Criar matéria'}</button></form></DialogContent></Dialog>
- <Dialog open={examDialog} onOpenChange={v=>{if(!busy)setExamDialog(v);}}><DialogContent className="subject-dialog exam-dialog"><DialogTitle>{editingExam?'Editar prova':'Nova prova'}</DialogTitle><DialogDescription>Registre os dados para lembrar da avaliação.</DialogDescription><form onSubmit={submitExam}><label>Nome da prova</label><input required maxLength={200} placeholder="Ex.: AOP 2 — Engenharia de Software" value={examTitle} onChange={e=>setExamTitle(e.target.value)} disabled={busy}/><label>Matéria</label><select required value={examSubject} onChange={e=>setExamSubject(e.target.value)} disabled={busy}>{data.subjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select><div className="exam-fields"><div><label>Data</label><input required type="date" value={examDate} onChange={e=>setExamDate(e.target.value)} disabled={busy}/></div><div><label>Horário</label><input required type="time" value={examTime} onChange={e=>setExamTime(e.target.value)} disabled={busy}/></div></div><label>Conteúdo para revisar</label><textarea maxLength={500000} placeholder="Ex.: Módulos 10 e 11, endereçamento IPv4…" value={examContent} onChange={e=>setExamContent(e.target.value)} disabled={busy}/><button className="btn primary w-full" disabled={busy}>{busy?'Salvando…':editingExam?'Salvar prova':'Registrar prova'}</button></form></DialogContent></Dialog>
- <AlertDialog open={!!remove} onOpenChange={v=>{if(!v&&!busy)setRemove(null);}}><AlertDialogContent><AlertDialogTitle>{remove?.label}</AlertDialogTitle><AlertDialogDescription>Esta ação é permanente e não pode ser desfeita.</AlertDialogDescription><AlertDialogFooter><AlertDialogCancel disabled={busy}>Cancelar</AlertDialogCancel><AlertDialogAction disabled={busy} className="bg-red-600 hover:bg-red-700 text-white" onClick={e=>{e.preventDefault();destroy();}}>{busy?'Excluindo…':'Excluir'}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
- </>;
+export default function Notebook() {
+  return (
+    <>
+      <AuthGate />
+      <Toaster richColors position="bottom-right" />
+    </>
+  );
+}
+function Workspace() {
+  const [data, setData] = useState<Data>({
+      subjects: [],
+      notes: [],
+      files: [],
+      exams: [],
+    }),
+    [loading, setLoading] = useState(true),
+    [error, setError] = useState(""),
+    [view, setView] = useState<"home" | "exams">("home"),
+    [subjectId, setSubjectId] = useState<string | null>(null),
+    [note, setNote] = useState<Note | null>(null),
+    [dirty, setDirty] = useState(false),
+    [busy, setBusy] = useState(false),
+    [dialog, setDialog] = useState(false),
+    [editSubject, setEditSubject] = useState<Subject | null>(null),
+    [name, setName] = useState(""),
+    [color, setColor] = useState(colors[0]),
+    [remove, setRemove] = useState<{
+      action: string;
+      id: string;
+      label: string;
+    } | null>(null),
+    [editingContent, setEditingContent] = useState(false);
+  const { setOpenMobile } = useSidebar();
+  const uploadRef = useRef<HTMLInputElement>(null);
+  const lock = useRef(false);
+  const editorValues = useRef<Record<string, string>>({});
+  const current = data.subjects.find((s) => s.id === subjectId);
+  const [examDialog, setExamDialog] = useState(false),
+    [editingExam, setEditingExam] = useState<Exam | null>(null),
+    [examTitle, setExamTitle] = useState(""),
+    [examSubject, setExamSubject] = useState(""),
+    [examDate, setExamDate] = useState(""),
+    [examTime, setExamTime] = useState(""),
+    [examContent, setExamContent] = useState("");
+  const notes = data.notes.filter((n) => n.subject === subjectId);
+  const attachments = data.files.filter((f) => f.note === note?.id);
+  async function refresh() {
+    const result = await api();
+    setData(result);
+    setError("");
+    return result as Data;
+  }
+  useEffect(() => {
+    refresh()
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+  useEffect(() => {
+    const fn = (e: BeforeUnloadEvent) => {
+      if (dirty) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", fn);
+    return () => window.removeEventListener("beforeunload", fn);
+  }, [dirty]);
+  function currentBlocks() {
+    if (!note) return [];
+    return noteBlocks(note).map((block) =>
+      editorValues.current[block.id] !== undefined
+        ? { ...block, content: editorValues.current[block.id] }
+        : block,
+    );
+  }
+  async function save() {
+    if (!note || !dirty) return true;
+    const blocks = currentBlocks(),
+      body = blocksToBody(blocks),
+      payload = { ...note, body, blocks: JSON.stringify(blocks) };
+    if (!note.title.trim() && !body.trim()) {
+      setDirty(false);
+      return true;
+    }
+    if (lock.current) return false;
+    lock.current = true;
+    setBusy(true);
+    try {
+      const r = await api({ action: "note", ...payload, blocks });
+      const saved = { ...payload, id: r.id, updated: new Date().toISOString() };
+      setNote(saved);
+      editorValues.current = {};
+      setData((d) => ({
+        ...d,
+        notes: [saved, ...d.notes.filter((n) => n.id !== r.id)],
+      }));
+      setDirty(false);
+      setEditingContent(false);
+      toast.success("Página salva");
+      return true;
+    } catch (e: any) {
+      toast.error(e.message);
+      return false;
+    } finally {
+      lock.current = false;
+      setBusy(false);
+    }
+  }
+  async function go(s: string | null, n: Note | null = null) {
+    if (busy) return;
+    if (!(await save())) return;
+    editorValues.current = {};
+    setView("home");
+    setSubjectId(s);
+    setNote(n);
+    setDirty(false);
+    setEditingContent(!n?.body.trim());
+    setOpenMobile(false);
+  }
+  async function newNote(s: string) {
+    if (busy) return;
+    if (!(await save())) return;
+    const first: StudyBlock = {
+      id: crypto.randomUUID(),
+      type: "concept",
+      title: "",
+      content: "",
+    };
+    editorValues.current = {};
+    setSubjectId(s);
+    setNote({
+      id: "",
+      subject: s,
+      title: "",
+      body: "",
+      summary: "",
+      blocks: JSON.stringify([first]),
+      updated: new Date().toISOString(),
+    });
+    setDirty(true);
+    setEditingContent(true);
+  }
+  function openSubject(s: Subject | null = null) {
+    setEditSubject(s);
+    setName(s?.name || "");
+    setColor(s?.color || colors[data.subjects.length % colors.length]);
+    setDialog(true);
+  }
+  async function submitSubject(e: React.FormEvent) {
+    e.preventDefault();
+    if (lock.current) return;
+    lock.current = true;
+    setBusy(true);
+    try {
+      const r = await api({
+        action: "subject",
+        id: editSubject?.id,
+        name,
+        color,
+      });
+      await refresh();
+      setDialog(false);
+      if (!editSubject && !note) {
+        setSubjectId(r.id);
+      }
+      toast.success(editSubject ? "Matéria atualizada" : "Matéria criada");
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      lock.current = false;
+      setBusy(false);
+    }
+  }
+  async function upload(files: FileList | null) {
+    if (!files?.length || !note) return;
+    if (!(await save())) return;
+    let nid = note.id;
+    if (!nid) {
+      toast.info(
+        "A página foi salva. Selecione os arquivos novamente para anexar.",
+      );
+      return;
+    }
+    setBusy(true);
+    try {
+      for (const f of Array.from(files)) {
+        if (f.size > 20 * 1024 * 1024)
+          throw new Error(`${f.name}: limite de 20 MB.`);
+        const form = new FormData();
+        form.set("file", f);
+        form.set("note", nid);
+        const saved = await api(form);
+        setData((d) => ({ ...d, files: [...d.files, saved] }));
+      }
+      toast.success("Arquivos anexados");
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+      if (uploadRef.current) uploadRef.current.value = "";
+    }
+  }
+  function setStudyBlocks(blocks: StudyBlock[]) {
+    if (!note) return;
+    const merged = blocks.map((block) =>
+      editorValues.current[block.id] !== undefined
+        ? { ...block, content: editorValues.current[block.id] }
+        : block,
+    );
+    setNote({
+      ...note,
+      blocks: JSON.stringify(merged),
+      body: blocksToBody(merged),
+    });
+    setDirty(true);
+  }
+  function updateBlock(id: string, patch: Partial<StudyBlock>) {
+    setStudyBlocks(
+      currentBlocks().map((block) =>
+        block.id === id ? { ...block, ...patch } : block,
+      ),
+    );
+  }
+  function addBlock(type: BlockType = "concept") {
+    setStudyBlocks([
+      ...currentBlocks(),
+      { id: crypto.randomUUID(), type, title: "", content: "" },
+    ]);
+  }
+  function removeBlock(id: string) {
+    const next = currentBlocks().filter((block) => block.id !== id);
+    delete editorValues.current[id];
+    setStudyBlocks(
+      next.length
+        ? next
+        : [
+            {
+              id: crypto.randomUUID(),
+              type: "concept",
+              title: "",
+              content: "",
+            },
+          ],
+    );
+  }
+  function moveBlock(index: number, direction: -1 | 1) {
+    const blocks = [...currentBlocks()],
+      next = index + direction;
+    if (next < 0 || next >= blocks.length) return;
+    [blocks[index], blocks[next]] = [blocks[next], blocks[index]];
+    setStudyBlocks(blocks);
+  }
+  function openExam(e: Exam | null = null) {
+    setEditingExam(e);
+    setExamTitle(e?.title || "");
+    setExamSubject(e?.subject || data.subjects[0]?.id || "");
+    setExamDate(e?.date || "");
+    setExamTime(e?.time || "09:00");
+    setExamContent(e?.content || "");
+    setExamDialog(true);
+  }
+  async function submitExam(ev: React.FormEvent) {
+    ev.preventDefault();
+    if (lock.current) return;
+    lock.current = true;
+    setBusy(true);
+    try {
+      await api({
+        action: "exam",
+        id: editingExam?.id,
+        title: examTitle,
+        subject: examSubject,
+        date: examDate,
+        time: examTime,
+        content: examContent,
+      });
+      await refresh();
+      setExamDialog(false);
+      toast.success(editingExam ? "Prova atualizada" : "Prova registrada");
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      lock.current = false;
+      setBusy(false);
+    }
+  }
+  async function destroy() {
+    if (!remove) return;
+    setBusy(true);
+    try {
+      await api(remove);
+      if (remove.action === "delete-note") {
+        setNote(null);
+        setDirty(false);
+      }
+      if (remove.action === "delete-subject") {
+        setNote(null);
+        setDirty(false);
+        setSubjectId(null);
+      }
+      await refresh();
+      setRemove(null);
+      toast.success("Excluído");
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  useEffect(() => {
+    const context = (document as any).modelContext;
+    if (!context?.registerTool) return;
+    const life = new AbortController();
+    const schema = {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    };
+    Promise.all([
+      context.registerTool(
+        {
+          name: "list_study_notebook",
+          description: "Lista as matérias e páginas salvas do caderno atual.",
+          inputSchema: schema,
+          annotations: { readOnlyHint: true, untrustedContentHint: true },
+          execute: async () => {
+            const d = await refresh();
+            return {
+              subjects: d.subjects,
+              notes: d.notes.map((n) => ({
+                id: n.id,
+                subject: n.subject,
+                title: n.title,
+              })),
+              files: d.files,
+            };
+          },
+        },
+        { signal: life.signal },
+      ),
+      context.registerTool(
+        {
+          name: "export_study_notebook",
+          description:
+            "Exporta o backup completo e privado do caderno atual, incluindo matérias, páginas, resumos, blocos, provas e metadados de arquivos.",
+          inputSchema: schema,
+          annotations: { readOnlyHint: true, untrustedContentHint: true },
+          execute: async () => await refresh(),
+        },
+        { signal: life.signal },
+      ),
+    ]).catch(() => {});
+    return () => life.abort();
+  }, []);
+  return (
+    <>
+      <Sidebar className="border-r border-[#e5e9f2]">
+        <SidebarHeader className="px-6 pt-8 pb-9">
+          <button className="brand" onClick={() => go(null)}>
+            <span className="brand-icon">
+              <NotebookPen size={23} />
+            </span>
+            <span>
+              Caderno<span className="brand-small">MEU ESPAÇO DE ESTUDOS</span>
+            </span>
+          </button>
+        </SidebarHeader>
+        <SidebarContent className="px-4">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                className="nav-item"
+                isActive={!subjectId}
+                onClick={() => go(null)}
+              >
+                <Library />
+                <span>Minhas matérias</span>
+                <span className="count">{data.subjects.length}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                className="nav-item"
+                isActive={view === "exams"}
+                onClick={() => {
+                  if (!busy) {
+                    setView("exams");
+                    setSubjectId(null);
+                    setNote(null);
+                    setOpenMobile(false);
+                  }
+                }}
+              >
+                <CalendarDays />
+                <span>Provas</span>
+                <span className="count">{data.exams.length}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+          <div className="side-label">
+            MATÉRIAS
+            <button
+              title="Nova matéria"
+              onClick={() => openSubject()}
+              disabled={busy}
+            >
+              <Plus size={17} />
+            </button>
+          </div>
+          <SidebarMenu>
+            {data.subjects.map((s) => (
+              <SidebarMenuItem key={s.id}>
+                <SidebarMenuButton
+                  className="nav-item"
+                  isActive={subjectId === s.id}
+                  onClick={() => go(s.id)}
+                >
+                  <BookOpen style={{ color: s.color }} />
+                  <span>{s.name}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+          {!data.subjects.length && !loading && (
+            <p className="side-hint">Suas matérias aparecerão aqui.</p>
+          )}
+          <button
+            className="side-add"
+            onClick={() => openSubject()}
+            disabled={busy}
+          >
+            <Plus size={17} />
+            Adicionar matéria
+          </button>
+        </SidebarContent>
+        <SidebarFooter className="p-5">
+          <div className="private">
+            <LockKeyhole size={16} />
+            <div>
+              Caderno privado<small>Seu espaço, suas anotações</small>
+            </div>
+          </div>
+        </SidebarFooter>
+      </Sidebar>
+      <main className="workspace">
+        <header className="topbar">
+          <div className="breadcrumb">
+            <SidebarTrigger />
+            <button onClick={() => go(null)}>Meu caderno</button>
+            {current && (
+              <>
+                <span>/</span>
+                <button onClick={() => go(current.id)}>{current.name}</button>
+              </>
+            )}
+          </div>
+          <span className="private-tag">
+            <LockKeyhole size={14} />
+            Pessoal
+          </span>
+        </header>
+        <div className="main-content">
+          {error ? (
+            <div role="alert" className="error-box">
+              <h2>Não foi possível abrir seu caderno</h2>
+              <p>{error}</p>
+              <button
+                className="btn primary"
+                onClick={() => {
+                  setLoading(true);
+                  refresh()
+                    .catch((e) => setError(e.message))
+                    .finally(() => setLoading(false));
+                }}
+              >
+                Tentar novamente
+              </button>
+            </div>
+          ) : loading ? (
+            <div className="loading">
+              <Skeleton className="h-12 w-64" />
+              <Skeleton className="h-6 w-80" />
+              <div className="cards">
+                {[1, 2, 3].map((i) => (
+                  <Skeleton className="h-56" key={i} />
+                ))}
+              </div>
+            </div>
+          ) : note ? (
+            <>
+              <div className="editor-top">
+                <button
+                  className="text-button"
+                  disabled={busy}
+                  onClick={() => go(subjectId)}
+                >
+                  <ArrowLeft size={17} />
+                  Voltar às páginas
+                </button>
+                <div className="row">
+                  <span className="save-status" aria-live="polite">
+                    {busy ? (
+                      <>
+                        <Loader2 size={14} className="spin" />
+                        Salvando…
+                      </>
+                    ) : dirty ? (
+                      "Alterações não salvas"
+                    ) : (
+                      <>
+                        <Check size={14} />
+                        Salvo online
+                      </>
+                    )}
+                  </span>
+                  <button
+                    className="btn primary"
+                    disabled={busy || !dirty}
+                    onClick={save}
+                  >
+                    <Save size={16} />
+                    Salvar
+                  </button>
+                  {note.id && (
+                    <button
+                      className="icon-button danger"
+                      title="Excluir página"
+                      disabled={busy}
+                      onClick={() =>
+                        setRemove({
+                          action: "delete-note",
+                          id: note.id,
+                          label: "Excluir esta página e todos os seus anexos?",
+                        })
+                      }
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  )}
+                </div>
+              </div>
+              <article className="paper">
+                <div className="page-label">
+                  <BookOpen size={15} style={{ color: current?.color }} />
+                  {current?.name}
+                  <span>PÁGINA DE ESTUDOS</span>
+                </div>
+                <div className="content-mode-bar">
+                  {editingContent ? (
+                    <span>Crie um cartão para cada tópico da aula</span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn edit-content-button"
+                      onClick={() => setEditingContent(true)}
+                    >
+                      <Pencil size={16} />
+                      Editar página
+                    </button>
+                  )}
+                </div>
+                {editingContent ? (
+                  <input
+                    aria-label="Título da página"
+                    placeholder="Título da sua página"
+                    className="title-input"
+                    maxLength={200}
+                    value={note.title}
+                    disabled={busy}
+                    onChange={(e) => {
+                      setNote({ ...note, title: e.target.value });
+                      setDirty(true);
+                    }}
+                  />
+                ) : (
+                  <h1 className="reading-title">
+                    {note.title || "Página sem título"}
+                  </h1>
+                )}
+                <div className="quick-summary">
+                  {editingContent ? (
+                    <>
+                      <div className="summary-heading">
+                        <span>RESUMO RÁPIDO</span>
+                        <small>
+                          Opcional: escreva de 3 a 5 pontos. Se deixar vazio,
+                          usaremos os títulos dos cartões.
+                        </small>
+                      </div>
+                      <textarea
+                        aria-label="Resumo rápido"
+                        className="summary-input"
+                        maxLength={12000}
+                        placeholder="• Conceito principal\n• Exemplo importante\n• Ponto que costuma cair na prova"
+                        value={note.summary || ""}
+                        onChange={(e) => {
+                          setNote({ ...note, summary: e.target.value });
+                          setDirty(true);
+                        }}
+                        disabled={busy}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <div className="summary-heading">
+                        <span>RESUMO RÁPIDO</span>
+                        <small>Revisão em menos de um minuto</small>
+                      </div>
+                      <ul>
+                        {derivedSummary(note).map((item, i) => (
+                          <li key={i}>{item}</li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                </div>
+                <div className="writing-info">
+                  <Pencil size={14} />
+                  {editingContent ? "Blocos da página" : "Anotações"}
+                  <span>
+                    {noteBlocks(note).length}{" "}
+                    {noteBlocks(note).length === 1 ? "tópico" : "tópicos"} ·{" "}
+                    {note.body.trim()
+                      ? note.body.trim().split(/\s+/).length
+                      : 0}{" "}
+                    palavras
+                  </span>
+                </div>
+                {editingContent ? (
+                  <div className="block-editor">
+                    <div className="block-editor-intro">
+                      <strong>Organize a aula por tópicos</strong>
+                      <span>
+                        Escolha o tipo, dê um nome ao tópico e cole o conteúdo
+                        dentro do cartão.
+                      </span>
+                    </div>
+                    {noteBlocks(note).map((block, index, all) => (
+                      <section
+                        className={`edit-block-card ${block.type}`}
+                        key={block.id}
+                      >
+                        <div className="edit-block-top">
+                          <label>
+                            <span>Tipo do bloco</span>
+                            <select
+                              value={block.type}
+                              onChange={(e) =>
+                                updateBlock(block.id, {
+                                  type: e.target.value as BlockType,
+                                })
+                              }
+                              disabled={busy}
+                            >
+                              {blockTypes.map((type) => (
+                                <option key={type.value} value={type.value}>
+                                  {type.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <div className="block-order">
+                            <button
+                              type="button"
+                              title="Mover tópico para cima"
+                              disabled={busy || index === 0}
+                              onClick={() => moveBlock(index, -1)}
+                            >
+                              <ArrowUp size={16} />
+                            </button>
+                            <button
+                              type="button"
+                              title="Mover tópico para baixo"
+                              disabled={busy || index === all.length - 1}
+                              onClick={() => moveBlock(index, 1)}
+                            >
+                              <ArrowDown size={16} />
+                            </button>
+                            <button
+                              type="button"
+                              className="danger"
+                              title="Excluir tópico"
+                              disabled={busy}
+                              onClick={() => removeBlock(block.id)}
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </div>
+                        <label className="block-field">
+                          <span>Título do tópico</span>
+                          <input
+                            value={block.title}
+                            maxLength={180}
+                            placeholder="Ex.: MVC — Model-View-Controller"
+                            onChange={(e) =>
+                              updateBlock(block.id, { title: e.target.value })
+                            }
+                            disabled={busy}
+                          />
+                        </label>
+                        <div className="block-field">
+                          <span>Conteúdo</span>
+                          <BlockEditor
+                            value={block.content}
+                            disabled={busy}
+                            onChange={(content) => {
+                              editorValues.current[block.id] = content;
+                              setDirty(true);
+                            }}
+                          />
+                        </div>
+                      </section>
+                    ))}
+                    <button
+                      type="button"
+                      className="add-study-block"
+                      onClick={() => addBlock()}
+                      disabled={busy}
+                    >
+                      <Plus size={18} />
+                      Adicionar novo tópico
+                    </button>
+                  </div>
+                ) : (
+                  <div className="reading-area">
+                    <div className="topics-overview">
+                      <span>TÓPICOS DESTA PÁGINA</span>
+                      <ol>
+                        {noteBlocks(note)
+                          .filter((block) => block.title.trim())
+                          .map((block) => (
+                            <li key={block.id}>{block.title}</li>
+                          ))}
+                      </ol>
+                    </div>
+                    <div className="reading-kicker">
+                      <span>CONTEÚDO DA PÁGINA</span>
+                      <small>Abra cada bloco no seu ritmo</small>
+                    </div>
+                    <div className="study-sections">
+                      {studySections(note).map(renderStudySection)}
+                    </div>
+                    <button
+                      type="button"
+                      className="btn edit-content-button"
+                      onClick={() => setEditingContent(true)}
+                    >
+                      <Pencil size={16} />
+                      Editar página
+                    </button>
+                  </div>
+                )}
+                <section className="attachments">
+                  <div className="section-line">
+                    <h3>
+                      <Paperclip size={17} />
+                      Arquivos da página <span>{attachments.length}</span>
+                    </h3>
+                    <button
+                      className="text-button"
+                      disabled={busy || !note.id || dirty}
+                      onClick={() => uploadRef.current?.click()}
+                    >
+                      <Plus size={16} />
+                      Anexar arquivo
+                    </button>
+                  </div>
+                  <input
+                    ref={uploadRef}
+                    type="file"
+                    multiple
+                    hidden
+                    onChange={(e) => upload(e.target.files)}
+                  />
+                  {attachments.length ? (
+                    <div className="file-list">
+                      {attachments.map((f) => (
+                        <div className="file-row" key={f.id}>
+                          <FileText size={21} />
+                          <div>
+                            <strong>{f.name}</strong>
+                            <small>
+                              {f.size < 1048576
+                                ? Math.ceil(f.size / 1024) + " KB"
+                                : (f.size / 1048576).toFixed(1) + " MB"}
+                            </small>
+                          </div>
+                          <a
+                            className="icon-button"
+                            href={"/api/notebook?file=" + f.id}
+                            title={"Baixar " + f.name}
+                          >
+                            <Download size={17} />
+                          </a>
+                          <button
+                            className="icon-button danger"
+                            title={"Excluir " + f.name}
+                            disabled={busy}
+                            onClick={() =>
+                              setRemove({
+                                action: "delete-file",
+                                id: f.id,
+                                label: `Excluir o arquivo “${f.name}”?`,
+                              })
+                            }
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="upload-empty">
+                      <Paperclip size={24} />
+                      <p>
+                        {!note.id || dirty
+                          ? "Salve a página para anexar seus materiais."
+                          : "Guarde aqui PDFs, imagens, documentos e outros materiais."}
+                      </p>
+                      <small>Até 20 MB por arquivo</small>
+                    </div>
+                  )}
+                </section>
+              </article>
+            </>
+          ) : view === "exams" ? (
+            <div className="exams-view">
+              <div className="page-heading">
+                <div>
+                  <p className="eyebrow">PLANEJAMENTO</p>
+                  <h1>
+                    Minhas provas<span className="heading-dot">.</span>
+                  </h1>
+                  <p className="subtitle">
+                    Cadastre suas avaliações e acompanhe o que está chegando.
+                  </p>
+                </div>
+                <button
+                  className="btn primary"
+                  disabled={busy || !data.subjects.length}
+                  onClick={() => openExam()}
+                >
+                  <Plus size={18} />
+                  Nova prova
+                </button>
+              </div>
+              <div className="summary-strip">
+                <span>
+                  <CalendarDays size={17} />
+                  <strong>{data.exams.length}</strong>provas cadastradas
+                </span>
+                <span>
+                  <Clock size={17} />
+                  <strong>
+                    {
+                      data.exams.filter(
+                        (e) => e.date >= new Date().toISOString().slice(0, 10),
+                      ).length
+                    }
+                  </strong>
+                  próximas
+                </span>
+              </div>
+              {!data.subjects.length ? (
+                <div className="error-box">
+                  <h2>Crie uma matéria primeiro</h2>
+                  <p>As provas ficam vinculadas às matérias do seu caderno.</p>
+                </div>
+              ) : data.exams.length ? (
+                <div className="exam-list">
+                  {data.exams.map((e) => {
+                    const sub = data.subjects.find((x) => x.id === e.subject);
+                    return (
+                      <div className="exam-row" key={e.id}>
+                        <span className="exam-date">
+                          <strong>
+                            {new Date(e.date + "T12:00").toLocaleDateString(
+                              "pt-BR",
+                              { day: "2-digit" },
+                            )}
+                          </strong>
+                          <small>
+                            {new Date(e.date + "T12:00")
+                              .toLocaleDateString("pt-BR", { month: "short" })
+                              .replace(".", "")}
+                          </small>
+                        </span>
+                        <div className="exam-info">
+                          <h3>{e.title}</h3>
+                          <p>
+                            <span style={{ color: sub?.color }}>
+                              {sub?.name || "Matéria removida"}
+                            </span>{" "}
+                            · {e.time}
+                          </p>
+                          {e.content && <small>{e.content}</small>}
+                        </div>
+                        <button
+                          className="icon-button"
+                          title="Editar prova"
+                          onClick={() => openExam(e)}
+                        >
+                          <Pencil size={17} />
+                        </button>
+                        <button
+                          className="icon-button danger"
+                          title="Excluir prova"
+                          onClick={() =>
+                            setRemove({
+                              action: "delete-exam",
+                              id: e.id,
+                              label: `Excluir a prova “${e.title}”?`,
+                            })
+                          }
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <Empty className="empty-panel">
+                  <EmptyHeader>
+                    <span className="empty-icon">
+                      <CalendarDays size={32} />
+                    </span>
+                    <EmptyTitle>Nenhuma prova cadastrada</EmptyTitle>
+                    <EmptyDescription>
+                      Adicione suas avaliações para lembrar das datas e do
+                      conteúdo.
+                    </EmptyDescription>
+                  </EmptyHeader>
+                  <button className="btn primary" onClick={() => openExam()}>
+                    <Plus size={17} />
+                    Cadastrar primeira prova
+                  </button>
+                </Empty>
+              )}
+            </div>
+          ) : (
+            <>
+              <div className="page-heading">
+                <div>
+                  <p className="eyebrow">SEU CADERNO DIGITAL</p>
+                  <h1>
+                    {current ? current.name : "Minhas matérias"}
+                    <span className="heading-dot">.</span>
+                  </h1>
+                  <p className="subtitle">
+                    {current
+                      ? "Cada aula, uma nova página de conhecimento."
+                      : "Um lugar para tudo o que você está aprendendo."}
+                  </p>
+                </div>
+                <div className="row">
+                  {current ? (
+                    <>
+                      <button
+                        className="icon-button"
+                        title="Editar matéria"
+                        disabled={busy}
+                        onClick={() => openSubject(current)}
+                      >
+                        <Pencil size={18} />
+                      </button>
+                      <button
+                        className="icon-button danger"
+                        title="Excluir matéria"
+                        disabled={busy}
+                        onClick={() =>
+                          setRemove({
+                            action: "delete-subject",
+                            id: current.id,
+                            label:
+                              "Excluir esta matéria, suas páginas e todos os anexos?",
+                          })
+                        }
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                      <button
+                        className="btn primary"
+                        disabled={busy}
+                        onClick={() => newNote(current.id)}
+                      >
+                        <Plus size={18} />
+                        Nova página
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="btn primary"
+                      disabled={busy}
+                      onClick={() => openSubject()}
+                    >
+                      <Plus size={18} />
+                      Nova matéria
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="summary-strip">
+                <span>
+                  <BookOpen size={17} />
+                  <strong>
+                    {current ? notes.length : data.subjects.length}
+                  </strong>
+                  {current ? "páginas" : "matérias"}
+                </span>
+                <span>
+                  <FileText size={17} />
+                  <strong>
+                    {current
+                      ? notes
+                          .reduce((n, p) => n + p.body.length, 0)
+                          .toLocaleString("pt-BR")
+                      : data.notes.length}
+                  </strong>
+                  {current ? "caracteres anotados" : "páginas escritas"}
+                </span>
+                <span>
+                  <Paperclip size={17} />
+                  <strong>
+                    {current
+                      ? data.files.filter((f) =>
+                          notes.some((n) => n.id === f.note),
+                        ).length
+                      : data.files.length}
+                  </strong>
+                  arquivos
+                </span>
+              </div>
+              {current ? (
+                <>
+                  <div className="section-line section-title">
+                    <h2>Páginas desta matéria</h2>
+                    <span>
+                      {notes.length} {notes.length === 1 ? "página" : "páginas"}
+                    </span>
+                  </div>
+                  {notes.length ? (
+                    <div className="note-list">
+                      {notes.map((n) => (
+                        <button
+                          key={n.id}
+                          className="note-row"
+                          onClick={() => go(current.id, n)}
+                        >
+                          <span
+                            className="note-icon"
+                            style={{ color: current.color }}
+                          >
+                            <FileText size={24} />
+                          </span>
+                          <div>
+                            <h3>{n.title}</h3>
+                            <p>{n.body.slice(0, 110) || "Página sem texto"}</p>
+                          </div>
+                          <span className="note-date">{date(n.updated)}</span>
+                          <ArrowUpRight size={18} />
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <Empty className="empty-panel">
+                      <EmptyHeader>
+                        <span className="empty-icon">
+                          <FileText size={32} />
+                        </span>
+                        <EmptyTitle>Uma matéria, muitas descobertas</EmptyTitle>
+                        <EmptyDescription>
+                          Crie sua primeira página para registrar o conteúdo da
+                          aula.
+                        </EmptyDescription>
+                      </EmptyHeader>
+                      <button
+                        className="btn primary"
+                        onClick={() => newNote(current.id)}
+                      >
+                        <Plus size={17} />
+                        Criar primeira página
+                      </button>
+                    </Empty>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="section-line section-title">
+                    <h2>Suas matérias</h2>
+                    <span>Organizadas do seu jeito</span>
+                  </div>
+                  <div className="cards">
+                    {data.subjects.map((s, i) => {
+                      const ns = data.notes.filter((n) => n.subject === s.id);
+                      return (
+                        <button
+                          className="subject-card"
+                          key={s.id}
+                          onClick={() => go(s.id)}
+                          style={
+                            {
+                              "--subject-color": s.color,
+                            } as React.CSSProperties
+                          }
+                        >
+                          <div className="card-cover">
+                            <span className="cover-icon">
+                              <BookOpen size={29} />
+                            </span>
+                            <span className="cover-number">
+                              {String(i + 1).padStart(2, "0")}
+                            </span>
+                            <div className="cover-name">{s.name}</div>
+                          </div>
+                          <div className="card-bottom">
+                            <span>
+                              {ns.length}{" "}
+                              {ns.length === 1 ? "página" : "páginas"}
+                            </span>
+                            <ArrowUpRight size={18} />
+                          </div>
+                        </button>
+                      );
+                    })}
+                    <button className="new-card" onClick={() => openSubject()}>
+                      <span className="add-circle">
+                        <Plus size={24} />
+                      </span>
+                      <strong>
+                        {data.subjects.length
+                          ? "Nova matéria"
+                          : "Sua primeira matéria"}
+                      </strong>
+                      <p>
+                        {data.subjects.length
+                          ? "Abra espaço para aprender mais"
+                          : "Comece organizando o que você estuda"}
+                      </p>
+                    </button>
+                  </div>
+                  {!data.subjects.length && (
+                    <div className="getting-started">
+                      <span className="tiny-number">01</span>
+                      <div>
+                        <strong>Comece por uma matéria</strong>
+                        <p>
+                          Depois, crie páginas para suas aulas e reúna textos e
+                          arquivos no mesmo lugar.
+                        </p>
+                      </div>
+                      <NotebookPen size={38} />
+                    </div>
+                  )}
+                </>
+              )}
+              <footer className="page-footer">
+                <Cloud size={15} />
+                Seu conhecimento, guardado online.
+              </footer>
+            </>
+          )}
+        </div>
+      </main>
+      <Dialog
+        open={dialog}
+        onOpenChange={(v) => {
+          if (!busy) setDialog(v);
+        }}
+      >
+        <DialogContent className="subject-dialog">
+          <DialogTitle>
+            {editSubject ? "Editar matéria" : "Uma nova matéria"}
+          </DialogTitle>
+          <DialogDescription>
+            Dê um nome e escolha a cor do seu caderno.
+          </DialogDescription>
+          <form onSubmit={submitSubject}>
+            <label htmlFor="subject-name">Nome da matéria</label>
+            <input
+              id="subject-name"
+              autoFocus
+              required
+              maxLength={100}
+              placeholder="Ex.: Fundamentos de Redes"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              disabled={busy}
+            />
+            <label>Cor da capa</label>
+            <RadioGroup
+              value={color}
+              onValueChange={setColor}
+              className="color-picker"
+            >
+              {colors.map((c, i) => (
+                <label
+                  key={c}
+                  className="color-option"
+                  style={{ background: c }}
+                >
+                  <RadioGroupItem
+                    value={c}
+                    aria-label={
+                      ["Azul", "Roxo", "Verde", "Laranja", "Rosa", "Cinza"][i]
+                    }
+                    className="sr-only"
+                  />
+                  {color === c && <Check size={21} color="white" />}
+                </label>
+              ))}
+            </RadioGroup>
+            <button
+              className="btn primary w-full"
+              disabled={busy || !name.trim()}
+            >
+              {busy
+                ? "Salvando…"
+                : editSubject
+                  ? "Salvar matéria"
+                  : "Criar matéria"}
+            </button>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={examDialog}
+        onOpenChange={(v) => {
+          if (!busy) setExamDialog(v);
+        }}
+      >
+        <DialogContent className="subject-dialog exam-dialog">
+          <DialogTitle>
+            {editingExam ? "Editar prova" : "Nova prova"}
+          </DialogTitle>
+          <DialogDescription>
+            Registre os dados para lembrar da avaliação.
+          </DialogDescription>
+          <form onSubmit={submitExam}>
+            <label>Nome da prova</label>
+            <input
+              required
+              maxLength={200}
+              placeholder="Ex.: AOP 2 — Engenharia de Software"
+              value={examTitle}
+              onChange={(e) => setExamTitle(e.target.value)}
+              disabled={busy}
+            />
+            <label>Matéria</label>
+            <select
+              required
+              value={examSubject}
+              onChange={(e) => setExamSubject(e.target.value)}
+              disabled={busy}
+            >
+              {data.subjects.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+            <div className="exam-fields">
+              <div>
+                <label>Data</label>
+                <input
+                  required
+                  type="date"
+                  value={examDate}
+                  onChange={(e) => setExamDate(e.target.value)}
+                  disabled={busy}
+                />
+              </div>
+              <div>
+                <label>Horário</label>
+                <input
+                  required
+                  type="time"
+                  value={examTime}
+                  onChange={(e) => setExamTime(e.target.value)}
+                  disabled={busy}
+                />
+              </div>
+            </div>
+            <label>Conteúdo para revisar</label>
+            <textarea
+              maxLength={500000}
+              placeholder="Ex.: Módulos 10 e 11, endereçamento IPv4…"
+              value={examContent}
+              onChange={(e) => setExamContent(e.target.value)}
+              disabled={busy}
+            />
+            <button className="btn primary w-full" disabled={busy}>
+              {busy
+                ? "Salvando…"
+                : editingExam
+                  ? "Salvar prova"
+                  : "Registrar prova"}
+            </button>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <AlertDialog
+        open={!!remove}
+        onOpenChange={(v) => {
+          if (!v && !busy) setRemove(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogTitle>{remove?.label}</AlertDialogTitle>
+          <AlertDialogDescription>
+            Esta ação é permanente e não pode ser desfeita.
+          </AlertDialogDescription>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={busy}
+              className="bg-red-600 hover:bg-red-700 text-white"
+              onClick={(e) => {
+                e.preventDefault();
+                destroy();
+              }}
+            >
+              {busy ? "Excluindo…" : "Excluir"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
 }

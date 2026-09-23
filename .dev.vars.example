@@ -1,0 +1,5 @@
+# Copy to .dev.vars for local Workers development. Never commit the real secret.
+# Generate a random value with at least 32 characters.
+JWT_SECRET=replace-with-a-long-random-secret-of-at-least-32-characters
+# Local only: permits the on-demand account admin@local.test with password 123.
+DEV_SEED_ADMIN=true
