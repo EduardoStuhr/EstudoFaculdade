@@ -1,5 +1,8 @@
-# Copy to .dev.vars for local Workers development. Never commit the real secret.
-# Generate a random value with at least 32 characters.
+# Copy to .dev.vars. Never commit real values. Do not prefix with VITE_ or NEXT_PUBLIC_.
+# Generate: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 JWT_SECRET=replace-with-a-long-random-secret-of-at-least-32-characters
-# Local only: permits the on-demand account admin@local.test with password 123.
-DEV_SEED_ADMIN=true
+# Exact public origin; HTTPS required except localhost during local development.
+APP_URL=http://localhost:5173
+# Use a Resend API key with permission to send, and a verified sending domain.
+RESEND_API_KEY=
+EMAIL_FROM=Caderno de Estudos <conta@seu-dominio.com.br>

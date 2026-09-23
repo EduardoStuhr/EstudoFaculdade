@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { AuthForm, LogoutButton, type AuthLink } from "@/components/auth-form";
 import {
   BookOpen,
   Plus,
@@ -235,17 +236,32 @@ function BlockViewer({ value }: { value: string }) {
   return <EditorContent editor={editor} className="rich-content" />;
 }
 function AuthGate() {
+  const [authLink, setAuthLink] = useState<AuthLink | null>(null);
+  const initialLink = useRef<AuthLink | null | undefined>(undefined);
   const [ready, setReady] = useState(false),
     [user, setUser] = useState<{ name: string } | null>(null);
   useEffect(() => {
+    let active = true;
+    // Keep the captured link across Strict Mode's development effect replay.
+    if (initialLink.current === undefined) {
+      const params = new URLSearchParams(window.location.hash.slice(1));
+      const action = params.get("auth");
+      initialLink.current = action === "verify" || action === "reset"
+        ? { mode: action === "verify" ? "verify-email" : "reset-password", token: params.get("token") || "" }
+        : null;
+      if (initialLink.current) window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+    const link = initialLink.current;
     fetch("/api/auth/me")
-      .then(async (r) =>
-        r.ok
-          ? setUser(((await r.json()) as { user: { name: string } }).user)
-          : setUser(null),
-      )
-      .catch(() => setUser(null))
-      .finally(() => setReady(true));
+      .then(async (r) => {
+        const data = r.ok && !link ? await r.json() as { user: { name: string } } : null;
+        if (!active) return;
+        if (data) setUser(data.user);
+        else setUser(null);
+      })
+      .catch(() => { if (active) setUser(null); })
+      .finally(() => { if (active) { setAuthLink(link); setReady(true); } });
+    return () => { active = false; };
   }, []);
   if (!ready)
     return (
@@ -260,97 +276,7 @@ function AuthGate() {
       <Workspace />
     </SidebarProvider>
   ) : (
-    <Login onAuthenticated={() => setUser({ name: "" })} />
-  );
-}
-function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
-  const [register, setRegister] = useState(false),
-    [name, setName] = useState(""),
-    [email, setEmail] = useState(""),
-    [password, setPassword] = useState(""),
-    [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
-      const r = await fetch(
-        register ? "/api/auth/register" : "/api/auth/login",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(
-            register ? { name, email, password } : { email, password },
-          ),
-        },
-      );
-      const data = (await r.json()) as { error?: string };
-      if (!r.ok) throw new Error(data.error);
-      onAuthenticated();
-    } catch (err: any) {
-      setError(err.message || "Não foi possível continuar.");
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <main className="workspace">
-      <div className="main-content">
-        <article className="paper subject-dialog">
-          <p className="eyebrow">CADERNO DIGITAL</p>
-          <h1>
-            {register ? "Crie sua conta" : "Entre no seu caderno"}
-            <span className="heading-dot">.</span>
-          </h1>
-          <p className="subtitle">
-            Suas matérias e anotações ficam separadas e protegidas.
-          </p>
-          {error && <p className="error-box">{error}</p>}
-          <form onSubmit={submit}>
-            {register && (
-              <>
-                <label>Seu nome</label>
-                <input
-                  required
-                  maxLength={100}
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                />
-              </>
-            )}
-            <label>E-mail</label>
-            <input
-              required
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-            <label>Senha</label>
-            <input
-              required
-              minLength={register ? 12 : undefined}
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-            <button className="btn primary w-full" disabled={busy}>
-              {busy ? "Aguarde…" : register ? "Criar conta" : "Entrar"}
-            </button>
-          </form>
-          <button
-            className="text-button"
-            type="button"
-            onClick={() => {
-              setRegister(!register);
-              setError("");
-            }}
-          >
-            {register ? "Já tenho uma conta" : "Quero criar uma conta"}
-          </button>
-        </article>
-      </div>
-    </main>
+    <AuthForm link={authLink} onAuthenticated={() => { setAuthLink(null); setUser({ name: "" }); }} />
   );
 }
 async function api(body?: any) {
@@ -1145,6 +1071,7 @@ function Workspace() {
           </button>
         </SidebarContent>
         <SidebarFooter className="p-5">
+          <LogoutButton />
           <div className="private">
             <LockKeyhole size={16} />
             <div>

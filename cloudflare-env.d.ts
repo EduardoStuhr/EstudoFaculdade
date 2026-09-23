@@ -3,6 +3,8 @@ declare namespace Cloudflare {
     DB?: D1Database;
     BUCKET?: R2Bucket;
     JWT_SECRET?: string;
-    DEV_SEED_ADMIN?: string;
+    APP_URL?: string;
+    RESEND_API_KEY?: string;
+    EMAIL_FROM?: string;
   }
 }
