@@ -1,0 +1,13 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "caderno-estudos",
+  "compatibility_date": "2026-05-15",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "caderno-estudos-db",
+      "database_id": "e1924845-3615-4cc6-a0d1-50579f3ad132",
+      "migrations_dir": "drizzle"
+    }
+  ]
+}

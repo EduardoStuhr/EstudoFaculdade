@@ -42,6 +42,28 @@ wrangler d1 migrations apply <NOME_DO_BANCO> --remote
 
 Os registros antigos não são atribuídos automaticamente a uma conta. Após criar a conta de destino, revise e execute `scripts/reassign-legacy-user.sql`, substituindo os dois placeholders pelos IDs corretos. Isso atribui matérias, páginas, provas e metadados de anexos ao novo usuário sem copiar os binários do R2.
 
+## Banco da conta Cloudflare de Eduardo
+
+O binding `DB` usa o banco `caderno-estudos-db`, ID `e1924845-3615-4cc6-a0d1-50579f3ad132`. O ID não é uma credencial. A configuração fica em `wrangler.d1.json` e é reutilizada pelo build em `vite.config.ts`.
+
+Para criar as tabelas no banco remoto, execute com uma conta/token Cloudflare autorizada:
+
+```bash
+npx wrangler d1 migrations apply DB --remote --config wrangler.d1.json
+```
+
+Esse comando aplica as migrations versionadas, incluindo as tabelas de login e confirmação de e-mail. A alteração no GitHub sozinha não executa a migration nem cria as tabelas.
+
+Em Workers Builds, use `pnpm run build` para o build. Depois de configurar os recursos abaixo, o comando de deploy pode aplicar as migrations antes de publicar:
+
+```bash
+npx wrangler d1 migrations apply DB --remote --config wrangler.d1.json && npx wrangler deploy --config dist/server/wrangler.json
+```
+
+O token de build precisa de acesso ao D1 e à publicação do Worker. O nome do Worker gerado deve coincidir com o projeto em Workers Builds; confirme o nome no painel antes de publicar e, se necessário, informe `--name NOME_EXATO_DO_WORKER` no comando de deploy.
+
+**Ainda necessário:** criar/verificar o bucket R2 `site-creator-r2`, usado pelo binding `BUCKET` existente, e configurar `JWT_SECRET`, `RESEND_API_KEY`, `EMAIL_FROM` e `APP_URL` no ambiente de execução. Não coloque as chaves em arquivos versionados. O cadastro continua bloqueado até o envio de e-mail estar configurado. Criar um endereço `workers.dev` não fornece um domínio remetente para o Resend.
+
 ## Autenticação e integração do ChatGPT
 
 O header `oai-authenticated-user-id` foi removido. As rotas de dados exigem uma sessão JWT válida e cada consulta é filtrada por `user_id`.
