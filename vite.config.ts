@@ -2,11 +2,9 @@ import vinext from "vinext";
 import { defineConfig } from "vite";
 import { existsSync, readFileSync } from "node:fs";
 import hostingConfig from "./.openai/hosting.json";
+import databaseConfig from "./wrangler.d1.json";
 import { readExecutionProfile } from "./scripts/execution-profile.mjs";
 import { sites } from "./build/sites-vite-plugin";
-
-const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
-  "00000000-0000-4000-8000-000000000000";
 
 const { d1, r2 } = hostingConfig;
 const devVarsPath = new URL("./.dev.vars", import.meta.url);
@@ -36,8 +34,8 @@ const localBindingConfig = {
     ? [
         {
           binding: d1,
-          database_name: "site-creator-d1",
-          database_id: SITE_CREATOR_PLACEHOLDER_DATABASE_ID,
+          database_name: databaseConfig.d1_databases[0].database_name,
+          database_id: databaseConfig.d1_databases[0].database_id,
         },
       ]
     : [],
